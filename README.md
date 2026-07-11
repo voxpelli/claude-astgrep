@@ -335,6 +335,55 @@ npm run check          # all of the below
 
 `node verify-lsp.mjs [path/to/project]` also runs standalone against any project with an `sgconfig.yml`.
 
+### `spy-lsp.mjs` — read the wire instead of believing claims about it
+
+```
+node spy-lsp.mjs ast-grep lsp -c ./sgconfig.yml   2> spy.log
+```
+
+A **passthrough spy**: it answers nothing, swallows nothing, changes nothing. It forwards every byte in
+both directions verbatim and reports the conversation to stderr — the client's `initialize` capabilities,
+every server→client request *and the client's literal answer*, and every notification.
+
+It is the opposite of the shim, and that is the point. The shim is a *participant*: the moment it answers
+a request on the client's behalf, you can no longer see what the client would have said. The spy is
+deliberately inert, so what you observe is what the two ends actually do to each other.
+
+**Point it at Claude Code and the entire bug reproduces in one run:**
+
+```
+[SPY] CLIENT CAPABILITIES (as sent in `initialize`) — for many clients, published nowhere:
+[SPY]   {"workspace":{"configuration":false,"workspaceFolders":false},"textDocument":{…}}
+[SPY] server -> client  NOTIFY   window/logMessage type=3 "server initialized!"
+[SPY] server -> client  REQUEST  client/registerCapability  (id=0)
+[SPY] client -> server  ERROR    client/registerCapability -> -32601 "Unhandled method"  (38ms)  ** THE CLIENT DECLINED **
+[SPY] server -> client  NOTIFY   window/logMessage type=1 "Failed to register file watchers: …"
+```
+
+Read the last two lines together. **The server reports the failure, precisely and immediately** — and
+Claude Code registers no handler for `window/logMessage`, so nobody ever sees it. That is the whole
+investigation, in two lines, from a tool that took twenty minutes to write.
+
+**Why it exists.** Everything this project got *wrong*, it got wrong by trusting a claim about the wire
+instead of reading it. *"Claude Code replies `-32601`"* was asserted here for days on the strength of **a
+byte-log in someone else's GitHub issue.** It happens to be true — but it could as easily have been
+`{result: null}`, an accept-then-ignore, which would have made the client a promise-breaker rather than an
+honest decliner and **inverted the entire upstream write-up.** Nine lines of spy settled it in one run.
+The sibling claim that *"servers hang on the unanswered request"* was pure folklore, traceable to two
+reports that inferred silence from symptoms **without a byte trace**. A spy is cheap. Hearsay about a
+protocol is not.
+
+**What it cannot tell you** — and this is structural, not a limitation of the script. A notification
+carries no `id` and expects no reply, so a client that *displays* one and a client that *discards* one are
+**byte-identical here**. The spy proves the server **sent** it. Proving the client **surfaced** it needs a
+second, client-specific look at wherever that client routes such messages (for Claude Code:
+`claude --debug-file`, where they turn out not to appear at all).
+
+Set `SPY_BODIES=1` to dump full message bodies. To spy on the *real* client rather than a synthetic one,
+put `spy-lsp.mjs` in a throwaway plugin's `lspServers.command` and run
+`claude --plugin-dir <it> --debug-file <log>` — Claude Code surfaces a server's stderr, which is what this
+rides. (Remember plugin LSP servers start **lazily**, on the first *edit* to a claimed extension.)
+
 ### Verifying it live, without publishing
 
 `--plugin-dir` loads a plugin straight from a working copy for that session, and **takes precedence over
