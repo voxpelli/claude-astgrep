@@ -94,10 +94,9 @@ feature note.
 
 ### The bug it works around
 
-ast-grep's server has **no file watcher of its own**. Instead it does the spec-correct thing: on
-`initialized` it sends the *client* a `client/registerCapability` request, asking it to watch
-`**/*.{yml,yaml}` and report back via `workspace/didChangeWatchedFiles`. The LSP spec **requires the
-client to reply**. Claude Code replies `-32601 "Unhandled method"` and watches nothing.
+ast-grep's server has **no file watcher of its own**. On `initialized` it sends the *client* a
+`client/registerCapability` request, asking it to watch `**/*.{yml,yaml}` and report back via
+`workspace/didChangeWatchedFiles`. Claude Code replies `-32601 "Unhandled method"` and watches nothing.
 
 So the server is never told the rules changed, and **serves its startup rule set forever**.
 
@@ -106,10 +105,22 @@ and the server re-analyses it instantly, correct line numbers and all — while 
 all. Two channels; only one is wired. The plugin looks healthy while being half deaf, and you conclude
 your *rule* is wrong rather than unloaded.
 
-This is a client limitation, not an ast-grep one — hot-reload genuinely works in VSCode. And it is not
-being fixed: [`anthropics/claude-code#32595`](https://github.com/anthropics/claude-code/issues/32595)
-and its re-file `#52693` are both **closed as NOT_PLANNED**. Which is what turns a workaround into the
-only path.
+**Whose fault is it? Not, it turns out, the client's.** LSP 3.17 makes dynamic registration *opt-in*:
+
+> *"Not all clients need to support dynamic capability registration. A client opts in via the
+> `dynamicRegistration` property on the specific client capabilities."* … *"If a server wants to support
+> both static and dynamic registration it needs to check the client capability in the initialize
+> request."*
+
+Measured here: **Claude Code advertises `didChangeWatchedFiles.dynamicRegistration` as `undefined`.** It
+never opts in — which the spec expressly permits — so it is never obliged to honour a registration.
+**ast-grep registers anyway, without checking.** That is the actual conformance defect, and it is why
+`rust-analyzer` and `pyright`, which *do* check and fall back to self-watching, work fine in Claude Code
+while ast-grep does not.
+
+None of which helps you as a user: the client-side feature is genuinely absent, and it is not coming —
+[`anthropics/claude-code#32595`](https://github.com/anthropics/claude-code/issues/32595) and its re-file
+`#52693` are both **closed as NOT_PLANNED**. Hence the shim.
 
 ### What the shim does
 
