@@ -1,0 +1,6 @@
+# This plugin dogfoods itself: `npm run check:lsp` drives the ast-grep language server against
+# THIS repo, using the rule below as its fixture. So the verifier needs no arguments and no
+# external project — and the plugin cannot ship without proving, on every check, that the server
+# it registers actually produces diagnostics.
+ruleDirs:
+  - .ast-grep/rules

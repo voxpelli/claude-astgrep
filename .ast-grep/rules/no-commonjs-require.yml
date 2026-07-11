@@ -1,0 +1,10 @@
+# The fixture rule for this repo's own self-verification (`npm run check:lsp`).
+# It is deliberately trivial and deliberately real: verify-lsp.mjs drives the actual ast-grep
+# language server against a buffer that violates this rule, asserts a diagnostic comes back
+# carrying this id, and then asserts the FIXED buffer clears it.
+id: no-commonjs-require
+language: javascript
+message: ESM-only — use `import`, not `require()`
+severity: error
+rule:
+  pattern: require($ARG)

@@ -1,0 +1,23 @@
+{
+  "name": "vp-astgrep",
+  "private": true,
+  "type": "module",
+  "description": "Live ast-grep structural-lint diagnostics in Claude Code via the ast-grep language server.",
+  "scripts": {
+    "check": "run-p check:*",
+    "check:lsp": "node verify-lsp.mjs",
+    "check:md": "remark . --quiet --frail"
+  },
+  "devDependencies": {
+    "npm-run-all2": "^7.0.0",
+    "remark-cli": "^12.0.0",
+    "remark-preset-lint-consistent": "^6.0.0",
+    "remark-preset-lint-recommended": "^7.0.0"
+  },
+  "remarkConfig": {
+    "plugins": [
+      "remark-preset-lint-consistent",
+      "remark-preset-lint-recommended"
+    ]
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "name": "vp-astgrep",
+  "version": "0.1.0",
+  "description": "Live ast-grep structural-lint diagnostics in Claude Code via the ast-grep language server. Your .ast-grep rules fire as you edit, not only on a CLI run.",
+  "author": {
+    "name": "Pelle Wessman",
+    "url": "https://github.com/voxpelli"
+  },
+  "repository": "https://github.com/voxpelli/claude-astgrep",
+  "license": "MIT",
+  "keywords": ["ast-grep", "lsp", "language-server", "lint", "structural-search", "codemod", "diagnostics", "claude-plugin"],
+  "lspServers": {
+    "ast-grep": {
+      "command": "ast-grep",
+      "args": ["lsp", "-c", "${CLAUDE_PROJECT_DIR}/sgconfig.yml"],
+      "extensionToLanguage": {
+        ".js": "javascript",
+        ".mjs": "javascript",
+        ".cjs": "javascript",
+        ".jsx": "javascript"
+      },
+      "startupTimeout": 15000
+    }
+  }
+}
