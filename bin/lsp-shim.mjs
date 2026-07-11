@@ -11,23 +11,26 @@
 // `-32601 "Unhandled method"` and watches nothing, so ast-grep never learns its rules changed and
 // serves its STARTUP RULE SET FOREVER, while document sync keeps working perfectly.
 //
-// Claude Code is within its rights here, which is worth stating plainly. LSP makes dynamic
-// registration opt-in — "a client opts in via the `dynamicRegistration` property" — and Claude Code
-// advertises that property as `undefined` (measured). It never promised to watch files. ast-grep asks
-// anyway without checking, which is impolite but not a clear spec violation: `didChangeWatchedFiles`
-// has no static path at all, so asking and being refused is a legitimate outcome. `rust-analyzer` and
-// `pyright` DO check, see the refusal coming, and self-watch instead — which is why they work here and
-// ast-grep does not. That fallback is the real fix; this shim is the bridge to it.
+// Nobody is really at fault here, and it is worth saying so, because the temptation is to look for a
+// villain and there isn't one. LSP makes dynamic registration opt-in — "a client opts in via the
+// `dynamicRegistration` property" — and Claude Code advertises that property as `undefined` (measured).
+// It never claimed to watch files, and it is not obliged to. ast-grep asks anyway without checking,
+// which is *also* fine: `didChangeWatchedFiles` has no static path at all, so asking and being turned
+// down is a legitimate outcome. Both sides are behaving reasonably; the gap is simply between them.
 //
-// AND THE FAILURE WAS NEVER SILENT — that part cost a day to learn. ast-grep detects the refusal and
+// What ast-grep lacks is a FALLBACK. rust-analyzer and pyright check the capability, see it absent, and
+// watch the files themselves — which is why they work here and ast-grep doesn't. That fallback is the
+// real fix, and this shim is only the bridge to it.
+//
+// AND THE FAILURE WAS NEVER SILENT — that part took a day to learn. ast-grep notices the refusal and
 // reports it accurately, over `window/logMessage`:
 //
 //     [ERROR] Failed to register file watchers: Error { code: MethodNotFound, ... }
 //
-// CLAUDE CODE DISCARDS THAT MESSAGE. It surfaces a server's stderr under --debug but drops
-// window/logMessage entirely, so a precise, immediate error report became "the rules just don't
-// reload". That is the reason this file's own logging is loud about faults and quiet about success:
-// building a tool that fails silently, right after that, would be a poor joke.
+// That message doesn't surface in Claude Code, which shows a server's stderr under --debug but not its
+// window/logMessage. So a precise, immediate error report reached nobody, and the whole thing presented
+// as "the rules just don't reload". That is exactly why this file's own logging is loud about faults and
+// quiet about success — having just been on the receiving end of the alternative.
 //
 // anthropics/claude-code#32595 and its re-file #52693 are both CLOSED / NOT_PLANNED. A client-side
 // fix is not coming, which is what promotes this from a workaround to the only path — until ast-grep
@@ -67,10 +70,10 @@ if (!command) {
 
 // Everything we say goes to stderr — stdout is the LSP channel and must carry nothing else.
 //
-// Two levels, and the split is deliberate. This whole shim exists because a failure was invisible:
-// ast-grep reported its failed registration accurately, over `window/logMessage`, and Claude Code
-// discarded the message — so a precise, immediate error report became "the rules just don't reload"
-// and cost a day to rediagnose. Reproducing that in our own code would be a poor joke.
+// Two levels, and the split is deliberate. This whole shim exists because a failure was invisible: the
+// server reported it accurately over `window/logMessage`, that channel doesn't surface in Claude Code,
+// and so a precise error report became "the rules just don't reload" — a day to rediagnose. Having just
+// been on the receiving end of that, the least we can do is not reproduce it here.
 //
 //   log()   — the shim is degraded or dead. ALWAYS printed. No server, no `node`, watcher failed to
 //             attach, framing collapsed to a raw pipe. Every one of these means the user is about to
@@ -186,10 +189,10 @@ function main () {
     // about the client-side the server is actually talking to — which is us.
     //
     // And it removes a fragility that would otherwise be invisible. ast-grep today sends the
-    // registration UNCONDITIONALLY, without checking this capability — which is itself a small spec
-    // violation, and happens to be the only reason a shim works at all. If ast-grep ever fixes that,
-    // a shim that had stayed silent here would suddenly receive no registration, watch nothing, and
-    // die quietly. Advertising the capability we actually implement makes us correct either way.
+    // registration without checking this capability at all — which happens to be the only reason a
+    // shim has anything to intercept. If it ever starts checking (reasonably enough), a shim that had
+    // stayed silent here would suddenly receive no registration, watch nothing, and die quietly.
+    // Advertising the capability we genuinely implement keeps us correct either way.
     if (!advertised) {
       const capabilities = structuredClone(params.capabilities ?? {});
       capabilities.workspace ??= {};

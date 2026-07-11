@@ -209,9 +209,9 @@ try {
     check(!/\[lsp-shim\]/.test(quiet.stderr()), 'a healthy session — including a reload — prints NOTHING by default');
 
     // ...but a BROKEN shim must still shout. This is the guard that stops someone — most likely me —
-    // quietly demoting a fault to debug() later. The whole reason this plugin exists is that ast-grep
-    // reported its failure correctly and the CLIENT threw the message away; shipping a tool that fails
-    // silently, right after discovering that, would be indefensible.
+    // quietly demoting a fault to debug() later. The whole reason this plugin exists is that a server
+    // reported its failure correctly and the message never surfaced; having just spent a day on the
+    // receiving end of that, shipping a tool that fails silently would be a poor way to repay it.
     const missing = spawn(process.execPath, [SHIM, 'definitely-not-a-real-binary', 'lsp'], { stdio: ['pipe', 'pipe', 'pipe'] });
     let err = '';
     missing.stderr.on('data', (d) => { err += d; });

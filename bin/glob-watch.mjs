@@ -143,8 +143,8 @@ export function createGlobWatcher ({ root, globs, onChange, log = () => {}, debo
   } catch (err) {
     // NEVER quiet this. A watcher that fails to attach produces exactly the failure this whole shim
     // exists to fix: rules silently stop reloading, everything else keeps working, and the user is
-    // left to guess. Say it plainly, and say what still works — a half-deaf tool that admits it is
-    // half deaf is a different thing from one that pretends.
+    // left to guess. Say it plainly, and say what still works — a tool that admits what it cannot do
+    // is a very different thing from one that just goes quiet.
     log(`FAILED to watch ${root}: ${err.message}`);
     log('rules will NOT hot-reload — restart to pick up rule changes. Diagnostics themselves are unaffected.');
     return () => {};

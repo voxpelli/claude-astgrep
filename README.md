@@ -102,8 +102,8 @@ So the server is never told the rules changed, and **serves its startup rule set
 
 The symptom is what makes this expensive: **document sync keeps working perfectly.** Edit a source file
 and the server re-analyses it instantly, correct line numbers and all — while rule edits do nothing at
-all. Two channels; only one is wired. The plugin looks healthy while being half deaf, and you conclude
-your *rule* is wrong rather than unloaded.
+all. Two channels; only one is wired. So the plugin looks perfectly healthy, and you conclude your *rule*
+is wrong rather than simply never loaded.
 
 **Except it was never actually silent — and this is the part worth knowing.** ast-grep *notices* the
 refusal and reports it, immediately, naming the exact cause:
@@ -113,26 +113,28 @@ refusal and reports it, immediately, naming the exact cause:
     Error { code: MethodNotFound, message: "Unhandled method client/registerCapability" }
 ```
 
-**Claude Code discards that message.** It surfaces a server's *stderr*, but not its `window/logMessage` —
-72 KB of `--debug` output from a live session contains not one, not even the routine `INFO` lines the same
-server emits on every startup. So the diagnosis was being broadcast on the first handshake and thrown
-away, and the better part of a day went into rediscovering it by hand. **That** is the real bug here.
+That message never surfaces. Claude Code shows a server's *stderr* under `--debug`, but not its
+`window/logMessage` — 72 KB of debug output from a live session contains not one, not even the routine
+`INFO` lines the same server emits on every startup. So the explanation was there from the first
+handshake, and the better part of a day still went into rediscovering it by hand. Filed, gently, as the
+most useful thing to fix.
 
-**Whose fault is the rest? Less clear-cut than it looks, and not really ast-grep's.** LSP 3.17 makes
-dynamic registration opt-in — *"Not all clients need to support dynamic capability registration. A client
-opts in via the `dynamicRegistration` property"* — and Claude Code advertises that property as
-`undefined`, which the spec expressly permits. ast-grep registers anyway without checking, which is
-impolite but **not a clear violation**: the only imperative in that spec section is scoped to servers
-supporting *both* static and dynamic registration, and `didChangeWatchedFiles` has **no static path at
-all**. Asking, and being refused, is a legitimate outcome — and ast-grep handles the refusal correctly.
+**Nobody is really the villain here, which took a while to accept.** LSP makes dynamic registration
+opt-in — *"Not all clients need to support dynamic capability registration. A client opts in via the
+`dynamicRegistration` property"* — and Claude Code advertises that property as `undefined`. It never
+claimed to watch files, and it isn't obliged to. ast-grep asks anyway without checking, which is *also*
+fine: `didChangeWatchedFiles` has **no static path at all**, so asking and being turned down is a
+legitimate outcome, and ast-grep handles the refusal correctly. Two reasonable designs; the gap is just
+between them.
 
-What ast-grep lacks is a **fallback**: `rust-analyzer` and `pyright` check the capability, see it absent,
-and watch the files themselves. That is the fix, and it is why they work in Claude Code and ast-grep does
-not. See `UPSTREAM-brew--ast-grep.md`.
+What ast-grep lacks is a **fallback**. `rust-analyzer` and `pyright` check the capability, see it absent,
+and watch the files themselves — which is exactly why they work here and ast-grep doesn't. That's the
+real fix, it's entirely server-side, and it would let this shim be deleted. See
+`UPSTREAM-brew--ast-grep.md`.
 
-Meanwhile the client-side feature is genuinely absent and is not coming —
+Until then the client-side capability is absent and doesn't look imminent —
 [`anthropics/claude-code#32595`](https://github.com/anthropics/claude-code/issues/32595) and its re-file
-`#52693` are both **closed as NOT_PLANNED**. Hence the shim.
+`#52693` are both closed as NOT_PLANNED. Hence the shim.
 
 ### What the shim does
 
@@ -190,11 +192,11 @@ collapsing to a raw pipe, and above all **a watcher that fails to attach** —
 [lsp-shim] rules will NOT hot-reload — restart to pick up rule changes. Diagnostics are unaffected.
 ```
 
-That asymmetry is not fussiness. This entire plugin exists because a failure was invisible: ast-grep
-reported its refused registration accurately, over `window/logMessage`, and **Claude Code discarded the
-message** — turning a precise, immediate error into "the rules just don't reload" and costing a day to
-rediagnose. Building a tool that fails quietly, right after that, would be a poor joke. A half-deaf tool
-that *says* it is half deaf is a different thing from one that pretends.
+That asymmetry isn't fussiness. This whole plugin exists because a failure was invisible: the server
+reported it accurately over `window/logMessage`, that channel doesn't surface in Claude Code, and a
+precise error report turned into "the rules just don't reload" — a day to rediagnose. Having just been on
+the receiving end of that, the least this tool can do is not do it to you. A tool that says what it
+cannot do is a very different thing from one that just goes quiet.
 
 ### It is a stopgap, and it is meant to die
 
@@ -204,12 +206,11 @@ and it needs nothing from Anthropic:
 > **When the client does not advertise `workspace.didChangeWatchedFiles.dynamicRegistration`, watch the
 > rule files yourself.**
 
-That is exactly what **rust-analyzer** does (`files.watcher: "client" | "server"`) and what **pyright**
-does — and it is why *they* are immune to this in Claude Code while ast-grep is not. Measured here:
-**Claude Code advertises that capability as `undefined`.** It is honest about not watching files. The
-signal a fallback would key on is already there, and is currently ignored — while ast-grep registers its
-watchers unconditionally anyway, asking a client that has openly said it cannot watch files to watch
-files, and then trusting the silence.
+That's exactly what **rust-analyzer** does (`files.watcher: "client" | "server"`) and what **pyright**
+does — and it's why *they* are unaffected by this in Claude Code while ast-grep isn't. Measured here:
+**Claude Code advertises that capability as `undefined`**, which is the honest thing for a client that
+doesn't watch files. So the signal a fallback would key on is already sitting in `initialize`; it just
+isn't consulted yet.
 
 **Retirement trigger: ast-grep ships a self-watch fallback.** On that day this shim becomes dead code
 and `plugin.json` goes back to invoking `ast-grep` directly — which also drops the Node requirement.
