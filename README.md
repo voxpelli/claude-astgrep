@@ -69,7 +69,26 @@ Run `claude --debug` to see language-server startup errors.
 directory and exits if it isn't there; passing the path makes it independent of whatever cwd the
 client happens to use. This exact race is a known cross-editor failure mode.
 
-Rule files are watched — edit a rule and diagnostics update without a restart.
+### ⚠️ Changing a rule requires restarting Claude Code
+
+**Rule hot-reload does not work here.** Measured, not assumed.
+
+ast-grep's server asks the *client* to watch `**/*.{yml,yaml}` for it, via a dynamic
+`workspace/didChangeWatchedFiles` registration — it has no watcher of its own. Claude Code's LSP client
+does not honour that, so the server is never told the rules changed. Nothing errors; it just silently
+keeps its startup rule set.
+
+The symptom is precise and a little confusing if you don't know to expect it: **document sync keeps
+working perfectly** — edit a file and the server re-analyses it instantly, correct line numbers and all
+— while **rule edits have no effect whatsoever**. Two different channels; only one is wired. Verified by
+changing a rule's message, waiting, touching the file, and watching the server keep reporting the old
+text against freshly-analysed code.
+
+So: **edit a rule → restart Claude Code.** Adding a *new* rule has the same problem — it will not fire
+until a restart. (`ast-grep scan` on the CLI is unaffected; a fresh process always reads current rules,
+which is a handy way to check a rule while you write it.)
+
+This is a client limitation, not an ast-grep one — hot-reload genuinely works in VSCode.
 
 ## Which file types it claims, and why that is a rule rather than a taste
 

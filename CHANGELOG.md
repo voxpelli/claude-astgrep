@@ -12,7 +12,7 @@ Initial release.
 
 - **`lspServers` registration for the ast-grep language server** (`ast-grep lsp`, stdio). Rules in
   `.ast-grep/rules/*.yml` now produce diagnostics live, after each edit, instead of only on an
-  `ast-grep scan` run. Rule files are watched, so editing a rule hot-reloads it.
+  `ast-grep scan` run. (The claim that rule files hot-reload was WRONG — see 0.3.1.)
 - Claims the JavaScript family only (`.js`, `.mjs`, `.cjs`, `.jsx`). Deliberately does **not** claim
   `.ts`/`.tsx`: when two enabled LSP servers claim one extension the first registered wins and the
   others never start, so claiming TypeScript would risk silently disabling `typescript-lsp`.
@@ -22,6 +22,27 @@ Initial release.
   violating buffer produces a diagnostic carrying the rule's id, **and that the fixed buffer clears
   it**. The second half is what makes it an oracle rather than a smoke test: a check that only asserts
   the error case cannot distinguish a working linter from one that fires on everything.
+
+## 0.3.1 — 2026-07-11
+
+### Fixed (documentation — a false claim, measured and retracted)
+
+- **"Rule files are watched — edit a rule and diagnostics update without a restart" is FALSE in Claude
+  Code.** It was inherited from ast-grep's docs, where it is true *for VSCode*, and shipped untested.
+
+  ast-grep's server asks the **client** to watch `**/*.{yml,yaml}` for it, via a dynamic
+  `workspace/didChangeWatchedFiles` registration — it has no watcher of its own. Claude Code's LSP
+  client does not honour that, so the server is never told the rules changed. Nothing errors; it
+  silently keeps its startup rule set.
+
+  The symptom is worth knowing precisely, because it misleads: **document sync keeps working perfectly**
+  — edit a file and the server re-analyses it instantly, with correct line numbers — while **rule edits
+  have no effect at all**. Two channels; only one is wired. Established by changing a rule's message,
+  waiting 25s, touching the file, and watching the server keep reporting the OLD message against
+  FRESHLY-analysed code (the line number tracked the edit; the message did not).
+
+  **Edit or add a rule ⇒ restart Claude Code.** `ast-grep scan` on the CLI is unaffected — a fresh
+  process always reads current rules, which is the convenient way to iterate on a rule while writing it.
 
 ## 0.3.0 — 2026-07-11
 
