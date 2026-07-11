@@ -71,20 +71,55 @@ client happens to use. This exact race is a known cross-editor failure mode.
 
 Rule files are watched — edit a rule and diagnostics update without a restart.
 
-## ⚠️ Extension collisions
+## Which file types it claims, and why that is a rule rather than a taste
 
-When two enabled LSP servers claim the same file extension, **the first one registered wins and the
-others never start** ([plugins reference](https://code.claude.com/docs/en/plugins-reference)). The
-`/plugin` view warns you and names the winner.
+ast-grep is polyglot — it supports **28 languages**. This plugin claims **25 extensions**, and the line
+it draws is deliberate.
 
-This plugin claims only the **JavaScript** family — `.js`, `.mjs`, `.cjs`, `.jsx`. It deliberately does
-**not** claim `.ts`/`.tsx`, so enabling `typescript-lsp` cannot be broken by this plugin on TypeScript.
+Claude Code requires a **static** `extensionToLanguage` map: no wildcards, no globs, no computed
+config, no per-project override, and no way to influence precedence. And when two enabled LSP servers
+claim the same extension, **the first registered wins and the others never start**
+([plugins reference](https://code.claude.com/docs/en/plugins-reference)). So **every extension this
+plugin claims is one it may be taking away from a real language server.**
 
-But on `.js`, `typescript-lsp` and `vp-astgrep` **may be mutually exclusive**. If you run both and see
-diagnostics from only one, that is why — check `/plugin`.
+Claude Code's official LSP plugins together claim 31 extensions. Those split ast-grep's 28 languages
+into **15 contested** and **13 uncontested**. The rule:
 
-To lint other languages, add their extensions to `extensionToLanguage` (ast-grep itself infers the
-language from the file; the map is only how Claude Code decides which server to route to).
+> **Claim only what no official language server wants — plus the JavaScript family, which is a
+> deliberate, documented contest.**
+
+**Claimed (free by construction — nothing else wants them):**
+`.sh .bash .zsh` · `.css .scss` · `.html .htm` · `.json` · `.yaml .yml` · `.md` ·
+`.tf .tfvars .hcl` · `.nix` · `.ex .exs` · `.dart` · `.hs` · `.scala` · `.sol`
+
+**Claimed on purpose, and contested:** `.js .mjs .cjs .jsx` — `typescript-lsp` also claims these. We
+claim them anyway because JavaScript structural rules are this plugin's reason to exist. **If you run
+`typescript-lsp` too, the two may be mutually exclusive on `.js`.** `/plugin` names the winner.
+
+**Not claimed:** `.ts .tsx .py .rs .go .java .rb .php .c .cpp .h .cs .lua .kt .swift`. Claiming these
+would silently disable `pyright-lsp` / `rust-analyzer-lsp` / `gopls-lsp` / `jdtls-lsp` and friends. **A
+plugin that quietly breaks another plugin is the worst kind of plugin.** Add one only for a language
+whose real server you are certain you do not want.
+
+`check-extensions.mjs` enforces this on every `npm run check`, and `--refresh` re-derives the official
+claim list from the marketplace on your machine, so the rule cannot quietly rot as Anthropic ships new
+language servers.
+
+### Why it can't be dynamic
+
+The right set is genuinely **per-project** — it is exactly the set of `language:` values in your own
+`.ast-grep/rules/*.yml`, and it is trivially derivable from them. But Claude Code has no mechanism to
+compute or override an LSP config at load time, so a static map is the only option. Worse, a static map
+can never be *complete*: `customLanguages` in `sgconfig.yml` lets a project register its own tree-sitter
+grammar under **arbitrary** extensions, which no plugin-side map can anticipate.
+
+If you need a language this plugin does not claim, fork it and add the extension — that is a one-line
+change, and you are then making the collision trade-off knowingly, for your own setup.
+
+(Two upstream details worth knowing: ast-grep's language server **ignores the `languageId`** the client
+sends and re-detects the language from the file path, so only the *keys* of the map matter — the values
+are cosmetic. And ast-grep's own VSCode extension sidesteps all of this by claiming **every** file
+(`language: '*'`) and gating on `sgconfig.yml` instead; Claude Code offers no equivalent.)
 
 ## Not a replacement for `ast-grep scan`
 

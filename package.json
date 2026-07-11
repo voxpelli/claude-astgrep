@@ -5,6 +5,7 @@
   "description": "Live ast-grep structural-lint diagnostics in Claude Code via the ast-grep language server.",
   "scripts": {
     "check": "run-p check:*",
+    "check:extensions": "node check-extensions.mjs",
     "check:lsp": "node verify-lsp.mjs",
     "check:md": "remark . --quiet --frail"
   },
