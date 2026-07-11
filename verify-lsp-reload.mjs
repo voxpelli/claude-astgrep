@@ -109,7 +109,20 @@ function driver (cmd, argv) {
       await this.request(1, 'initialize', {
         processId: process.pid,
         rootUri,
-        capabilities: { workspace: { didChangeWatchedFiles: { dynamicRegistration: true } } },
+        // Advertise NOTHING, on purpose. This models the pessimistic client, and it is the single
+        // assumption this whole shim rests on.
+        //
+        // A spec-compliant server sends a *dynamic* registration only to a client that advertised
+        // `workspace.didChangeWatchedFiles.dynamicRegistration`. Claude Code answers -32601 to the
+        // registration and there is no public dump of what it advertises — so if ast-grep gated on
+        // that capability, the shim would receive no registration in production, watch nothing, and
+        // do nothing, while a verifier that helpfully advertised `true` stayed green forever. The
+        // test would be measuring its own generosity.
+        //
+        // Measured (ast-grep 0.39.x): it registers UNCONDITIONALLY, capability or no capability. So
+        // advertising nothing is the strictly stronger test, and it is the one we run — if a future
+        // ast-grep starts gating, this goes red here instead of silently in everyone's editor.
+        capabilities: {},
         workspaceFolders: [{ uri: rootUri, name: 'probe' }],
       });
       this.send({ method: 'initialized', params: {} });
@@ -143,6 +156,15 @@ try {
   const shim = driver(process.execPath, [SHIM, 'ast-grep', 'lsp', '-c', path.join(ROOT, 'sgconfig.yml')]);
   const first = await shim.open();
   check(messagesOf(first).includes(MSG_ONE), `shim is transparent: the violation still diagnoses ("${MSG_ONE}")`);
+
+  // The shim must AMEND the capabilities it forwards. We advertised nothing (see `open()`), so with a
+  // spec-compliant server that would mean no registration, no watcher, no reload — silently. ast-grep
+  // happens to register unconditionally today, which papers over it; this asserts we are not relying
+  // on that. It is the one message the shim rewrites rather than forwards verbatim.
+  check(/injected workspace\.didChangeWatchedFiles\.dynamicRegistration=true/.test(shim.stderr()),
+    'the shim advertises the watch capability it actually implements (so a compliant server still registers)');
+  check(/watching .* for "\*\*\/\*\.\{yml,yaml\}"/.test(shim.stderr()),
+    'and it watches the globs the SERVER registered, rather than any it hardcoded');
 
   // THE MONEY ASSERTION. Rewrite the rule on disk. Send no didChange, no request, nothing.
   writeRule(MSG_TWO);

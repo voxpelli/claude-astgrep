@@ -157,6 +157,19 @@ on the CLI: a fresh process reads current rules and will actually tell you the r
 without downgrading. It exists because a shim in the hot path of every LSP message should always have
 an off switch that does not require shipping a fix.
 
+### It is meant to leave
+
+`bin/lsp-shim.mjs` is written server-agnostic so that extracting it is a **move, not a rewrite**. It
+lives here only because ast-grep is the first thing that needed it.
+
+**Extraction trigger:** a second plugin needs it, *or* someone wants `csharp-lsp` / `elixir-lsp`
+unhung. Likely home: a `vp-lsp-shim` plugin in the same marketplace, which other LSP plugins wrap.
+
+Until then, the discipline that keeps it extractable is worth stating, because it is easy to lose by
+accident: **nothing in `bin/` may know what ast-grep is.** It spawns `argv[0]`. It watches the globs the
+*server* registered. It hardcodes no file extension, no config filename, no rule directory. The moment
+one `if (command === 'ast-grep')` appears, the extraction stops being free.
+
 ## Which file types it claims, and why that is a rule rather than a taste
 
 ast-grep is polyglot — it supports **28 languages**. This plugin claims **15 extensions**, and stops

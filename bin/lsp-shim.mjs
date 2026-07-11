@@ -87,7 +87,14 @@ function main () {
   let root = null;
   let disposeWatcher = null;
 
-  const toChild = (message) => child.stdin.write(encodeFrame(message));
+  // A watcher event can land in the window between the server dying and our cleanup running, and
+  // writing to a dead pipe throws EPIPE. Nothing useful can come of that: if the server is gone there
+  // is nobody to tell about a rule change.
+  child.stdin.on('error', (err) => log(`server stdin: ${err.message}`));
+  const toChild = (message) => {
+    if (child.exitCode !== null || child.signalCode !== null || child.stdin.destroyed) return;
+    child.stdin.write(encodeFrame(message));
+  };
 
   /**
    * Tell the server its watched files changed. This is the payload Claude Code should have been
@@ -121,7 +128,7 @@ function main () {
     log(`watching ${root} for ${globs.map((g) => JSON.stringify(g)).join(', ')}`);
   };
 
-  // --- client -> server. Forwarded verbatim; we only READ, to learn the workspace root.
+  // --- client -> server. Forwarded verbatim, with EXACTLY ONE exception: `initialize`.
   pump(process.stdin, child.stdin, 'client->server', (message) => {
     if (message?.method !== 'initialize') return;
 
@@ -133,12 +140,40 @@ function main () {
     // zero diagnostics. (This cost an afternoon.)
     try { root = realpathSync(dir); } catch { root = dir; }
 
-    // A free, unrepeatable probe: nobody has published what Claude Code actually advertises here. If
-    // it OMITS dynamicRegistration, then rust-analyzer/pyright self-watch and are immune. If it
-    // ADVERTISES it and then ignores the registration, they are silently broken too — a bigger story.
-    const advertises = params.capabilities?.workspace?.didChangeWatchedFiles?.dynamicRegistration;
-    log(`client advertises workspace.didChangeWatchedFiles.dynamicRegistration = ${advertises}`);
+    // A free probe: nobody has published what Claude Code actually advertises here. If it OMITS
+    // dynamicRegistration, then servers that respect the capability (rust-analyzer, pyright) correctly
+    // decline to register and fall back to self-watching. If it ADVERTISES it and then answers -32601
+    // to the registration, that is a plain broken promise.
+    const advertised = params.capabilities?.workspace?.didChangeWatchedFiles?.dynamicRegistration;
+    log(`client advertises workspace.didChangeWatchedFiles.dynamicRegistration = ${advertised}`);
     if (DEBUG) log(`client capabilities: ${JSON.stringify(params.capabilities)}`);
+
+    // THE ONE REWRITE. Everything else on this stream is passed through byte-for-byte; here we amend
+    // the client's advertised capabilities before the server sees them.
+    //
+    // This is not a hack — it is the shim telling the truth. The spec says a server may only use
+    // *dynamic* registration for watched files if the client advertised support for it. With this shim
+    // in the path, the client genuinely DOES support it: we answer the registration, we do the
+    // watching, we send the notification. Declaring the capability is simply an accurate statement
+    // about the client-side the server is actually talking to — which is us.
+    //
+    // And it removes a fragility that would otherwise be invisible. ast-grep today sends the
+    // registration UNCONDITIONALLY, without checking this capability — which is itself a small spec
+    // violation, and happens to be the only reason a shim works at all. If ast-grep ever fixes that,
+    // a shim that had stayed silent here would suddenly receive no registration, watch nothing, and
+    // die quietly. Advertising the capability we actually implement makes us correct either way.
+    if (!advertised) {
+      const capabilities = structuredClone(params.capabilities ?? {});
+      capabilities.workspace ??= {};
+      capabilities.workspace.didChangeWatchedFiles = {
+        ...capabilities.workspace.didChangeWatchedFiles,
+        dynamicRegistration: true,
+        // NOT relativePatternSupport: we resolve globs against the workspace root, not against an
+        // arbitrary RelativePattern baseUri. Advertising it would be a claim we cannot honour.
+      };
+      log('injected workspace.didChangeWatchedFiles.dynamicRegistration=true — the shim implements it, so the server should be told');
+      return { ...message, params: { ...params, capabilities } };
+    }
   });
 
   // --- server -> client. The interception lives here.
@@ -207,7 +242,8 @@ function main () {
  * @param {NodeJS.ReadableStream} source
  * @param {NodeJS.WritableStream} dest
  * @param {string} label
- * @param {(message: unknown) => boolean | void} inspect  Return `false` to swallow the message.
+ * @param {(message: unknown) => false | object | void} inspect  Return `false` to swallow the message,
+ *   an object to forward THAT instead (re-serialised), or nothing to forward the original bytes.
  */
 function pump (source, dest, label, inspect) {
   let rawPipe = false;
@@ -215,16 +251,21 @@ function pump (source, dest, label, inspect) {
 
   const push = createFrameReader({
     onFrame: (raw, message) => {
-      let forward = true;
+      let verdict;
       if (inspecting && message !== undefined) {
         try {
-          forward = inspect(message) !== false;
+          verdict = inspect(message);
         } catch (err) {
           inspecting = false;
           log(`${label}: inspection failed (${err.message}) — forwarding blind from here on; hot reload is off, the server is not`);
         }
       }
-      if (forward) dest.write(raw); // Verbatim. Never a re-serialisation.
+
+      if (verdict === false) return;                              // Swallowed.
+      // Default is the ORIGINAL bytes — never a re-serialisation, which would quietly rewrite key
+      // order and unicode escaping on every message. A rewrite happens only when `inspect` explicitly
+      // hands back a replacement, which today is exactly one message (`initialize`).
+      dest.write(typeof verdict === 'object' && verdict !== null ? encodeFrame(verdict) : raw);
     },
     onFramingError: (err, pending) => {
       rawPipe = true;
