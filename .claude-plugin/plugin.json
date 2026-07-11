@@ -1,6 +1,6 @@
 {
   "name": "vp-astgrep",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Live ast-grep structural-lint diagnostics in Claude Code via the ast-grep language server. Your .ast-grep rules fire as you edit, not only on a CLI run.",
   "author": {
     "name": "Pelle Wessman",
@@ -20,8 +20,10 @@
   ],
   "lspServers": {
     "ast-grep": {
-      "command": "ast-grep",
+      "command": "node",
       "args": [
+        "${CLAUDE_PLUGIN_ROOT}/bin/lsp-shim.mjs",
+        "ast-grep",
         "lsp",
         "-c",
         "${CLAUDE_PROJECT_DIR}/sgconfig.yml"

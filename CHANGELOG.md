@@ -4,6 +4,55 @@ All notable changes to `vp-astgrep` are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.4.0 — 2026-07-11
+
+**Rule hot-reload works.** 0.3.1 documented that it could not — this release retracts that limitation
+by fixing it, rather than by re-describing it.
+
+### Added
+
+- **`bin/lsp-shim.mjs` — a stdio shim between Claude Code and the language server.** It answers the
+  `client/registerCapability` request that Claude Code refuses to (it replies `-32601 "Unhandled
+  method"`), reads the watcher globs out of that registration, watches them itself, and injects the
+  `workspace/didChangeWatchedFiles` notification the client never sends. ast-grep then reloads its
+  rules and re-publishes diagnostics for every open document on its own.
+
+  **It is server-agnostic on purpose.** It spawns `argv[0]` and watches whatever globs the *server*
+  registered; nothing in it knows what ast-grep is. The same unanswered request makes `csharp-lsp` and
+  `elixir-lsp` — both in Anthropic's own marketplace — **hang outright** rather than merely go stale, so
+  this is written to be extracted into its own plugin once a second one needs it.
+
+  Upstream is not going to fix this: `anthropics/claude-code#32595` and its re-file `#52693` are both
+  closed as NOT_PLANNED.
+
+- **`verify-lsp-reload.mjs`** (`npm run check:reload`) — proves the reload end to end, and proves the
+  **bug** first: it asserts the *bare* server ignores an on-disk rule change, then that the same server
+  behind the shim emits an **unprompted** `publishDiagnostics` carrying the new rule's message, with no
+  `didChange` and no request of any kind. Establishing the RED baseline against the unproxied server is
+  what stops the test passing vacuously.
+- **`bin/lsp-framing.mjs` + `bin/glob-watch.mjs`**, unit-tested (`npm run check:unit`). Framing is
+  hand-rolled — Claude Code git-clones plugins and never runs `npm install`, so a runtime dependency
+  would not exist when the server starts. Zero deps is a hard constraint here, not a preference.
+- **`LSP_SHIM_DISABLE=1`** bypasses the shim and runs the server unproxied — 0.3.1's behaviour at
+  runtime, without downgrading. A shim in the hot path of every LSP message needs an off switch that
+  does not require shipping a fix.
+
+### Changed
+
+- ⚠️ **BREAKING: Node ≥ 20 must now be on Claude Code's `PATH`.** The shim is a Node script, so the
+  manifest's `command` is now `node` rather than `ast-grep`. **No node ⇒ no server ⇒ no diagnostics at
+  all**, which is a *worse* failure than the stale rules this release fixes, so it is called out loudly
+  in the README. The trap is `nvm`/`fnm`, which put node on your *shell's* `PATH` and not necessarily on
+  the one Claude Code inherits. Pin **0.3.1** to avoid the dependency entirely.
+
+### Notes
+
+- The shim makes the *server* current; it does not make Claude Code re-surface diagnostics on its own.
+  Claude Code injects diagnostics after a **file edit**, so the honest UX is *edit a rule, then edit
+  code, and the new rule applies.*
+- `ast-grep/ast-grep#722` (open) is a sharp edge worth knowing: ast-grep **silently ignores an invalid
+  rule** on reload, so saving half-written YAML makes diagnostics quietly vanish rather than error.
+
 ## 0.1.0 — 2026-07-11
 
 Initial release.

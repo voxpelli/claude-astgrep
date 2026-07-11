@@ -3,11 +3,16 @@
   "private": true,
   "type": "module",
   "description": "Live ast-grep structural-lint diagnostics in Claude Code via the ast-grep language server.",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "check": "run-p check:*",
     "check:extensions": "node check-extensions.mjs",
     "check:lsp": "node verify-lsp.mjs",
-    "check:md": "remark . --quiet --frail"
+    "check:md": "remark . --quiet --frail",
+    "check:reload": "node verify-lsp-reload.mjs",
+    "check:unit": "node --test 'test/**/*.test.js'"
   },
   "devDependencies": {
     "npm-run-all2": "^7.0.0",

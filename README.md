@@ -31,6 +31,22 @@ Requires the `ast-grep` binary on `$PATH`:
 brew install ast-grep      # or: npm i -g @ast-grep/cli, cargo install ast-grep
 ```
 
+**And, since 0.4.0, Node ≥ 20 on `$PATH`** — the language server now runs behind a small stdio shim
+(see below), and the shim is a Node script. This is a real new requirement and worth stating bluntly:
+
+> **No `node` on Claude Code's `PATH` ⇒ the server does not start ⇒ you get no diagnostics at all.**
+> That is a *worse* failure than the stale rules 0.4.0 fixes, so it is the one thing to check first.
+
+The trap is `nvm`/`fnm`: they put `node` on the `PATH` of your *shell*, not of your desktop session. So
+`node -v` working in a terminal does **not** guarantee Claude Code can see it — if you launched Claude
+Code from Spotlight or the Dock rather than from that shell, it may not. If diagnostics vanish after
+upgrading, run `claude --debug` and look for a spawn failure on `node`; launching Claude Code from a
+shell where `node -v` works is the quickest fix.
+
+If you would rather not take the Node dependency, **pin `0.3.1`** — it invokes `ast-grep` directly, and
+its only cost is that rule edits need a restart. You can also keep 0.4.0 and set
+`LSP_SHIM_DISABLE=1`, which bypasses the shim and reverts to exactly 0.3.1's behaviour at runtime.
+
 ## Requirements — read this before filing a bug
 
 **Your project must have an `sgconfig.yml` in its root.** The ast-grep language server hard-exits
@@ -56,11 +72,12 @@ Run `claude --debug` to see language-server startup errors.
 ```jsonc
 "lspServers": {
   "ast-grep": {
-    "command": "ast-grep",
-    "args": ["lsp", "-c", "${CLAUDE_PROJECT_DIR}/sgconfig.yml"],
-    "extensionToLanguage": {
-      ".js": "javascript", ".mjs": "javascript", ".cjs": "javascript", ".jsx": "javascript"
-    }
+    "command": "node",
+    "args": [
+      "${CLAUDE_PLUGIN_ROOT}/bin/lsp-shim.mjs",   // <- the shim, since 0.4.0
+      "ast-grep", "lsp", "-c", "${CLAUDE_PROJECT_DIR}/sgconfig.yml"
+    ],
+    "extensionToLanguage": { ".js": "javascript", /* …14 more, see below */ }
   }
 }
 ```
@@ -69,26 +86,76 @@ Run `claude --debug` to see language-server startup errors.
 directory and exits if it isn't there; passing the path makes it independent of whatever cwd the
 client happens to use. This exact race is a known cross-editor failure mode.
 
-### ⚠️ Changing a rule requires restarting Claude Code
+## Rule hot-reload, and the shim that makes it work
 
-**Rule hot-reload does not work here.** Measured, not assumed.
+**Edit a rule, then edit some code, and the new rule applies. No restart.** That is new in 0.4.0, and
+0.3.1 shipped the opposite as a documented limitation — this section is a retraction as much as a
+feature note.
 
-ast-grep's server asks the *client* to watch `**/*.{yml,yaml}` for it, via a dynamic
-`workspace/didChangeWatchedFiles` registration — it has no watcher of its own. Claude Code's LSP client
-does not honour that, so the server is never told the rules changed. Nothing errors; it just silently
-keeps its startup rule set.
+### The bug it works around
 
-The symptom is precise and a little confusing if you don't know to expect it: **document sync keeps
-working perfectly** — edit a file and the server re-analyses it instantly, correct line numbers and all
-— while **rule edits have no effect whatsoever**. Two different channels; only one is wired. Verified by
-changing a rule's message, waiting, touching the file, and watching the server keep reporting the old
-text against freshly-analysed code.
+ast-grep's server has **no file watcher of its own**. Instead it does the spec-correct thing: on
+`initialized` it sends the *client* a `client/registerCapability` request, asking it to watch
+`**/*.{yml,yaml}` and report back via `workspace/didChangeWatchedFiles`. The LSP spec **requires the
+client to reply**. Claude Code replies `-32601 "Unhandled method"` and watches nothing.
 
-So: **edit a rule → restart Claude Code.** Adding a *new* rule has the same problem — it will not fire
-until a restart. (`ast-grep scan` on the CLI is unaffected; a fresh process always reads current rules,
-which is a handy way to check a rule while you write it.)
+So the server is never told the rules changed, and **serves its startup rule set forever**.
 
-This is a client limitation, not an ast-grep one — hot-reload genuinely works in VSCode.
+The symptom is what makes this expensive: **document sync keeps working perfectly.** Edit a source file
+and the server re-analyses it instantly, correct line numbers and all — while rule edits do nothing at
+all. Two channels; only one is wired. The plugin looks healthy while being half deaf, and you conclude
+your *rule* is wrong rather than unloaded.
+
+This is a client limitation, not an ast-grep one — hot-reload genuinely works in VSCode. And it is not
+being fixed: [`anthropics/claude-code#32595`](https://github.com/anthropics/claude-code/issues/32595)
+and its re-file `#52693` are both **closed as NOT_PLANNED**. Which is what turns a workaround into the
+only path.
+
+### What the shim does
+
+`bin/lsp-shim.mjs` sits between the two over stdio and answers the request the client won't:
+
+```
+Claude Code  <--stdio-->  lsp-shim  <--stdio-->  ast-grep lsp
+```
+
+1. It forwards every message **verbatim**, in both directions. (It parses frames to inspect them, but
+   forwards the original bytes — a proxy that re-serialises what it relays is a proxy that can silently
+   rewrite it.)
+2. It intercepts `client/registerCapability`, swallows it, and sends the server the `{ id, result: null }`
+   reply it is owed.
+3. It reads the watcher globs **out of that registration** and watches them itself.
+4. On a change it injects the `workspace/didChangeWatchedFiles` notification Claude Code never sends.
+   ast-grep reloads its rules and re-publishes diagnostics for every open document on its own.
+
+**It knows nothing about ast-grep.** It spawns `argv[0]`; it watches whatever globs the *server* asked
+for. That is deliberate — the same shim would unbreak `csharp-lsp` and `elixir-lsp`, which are shipped
+in Anthropic's own marketplace and, unlike ast-grep, **block** on that unanswered request and hang
+outright. It is written to be extracted into its own plugin once a second one needs it.
+
+`npm run check:reload` proves it end to end, and proves the bug first: it asserts the **bare** server
+ignores a rule change, then that the same server behind the shim emits an **unprompted**
+`publishDiagnostics` carrying the new rule's message — with no `didChange` and no request of any kind.
+
+### What it does *not* do
+
+It makes the **server** current; it does not make Claude Code re-surface diagnostics spontaneously.
+Claude Code injects diagnostics into context **after a file edit**. So the honest description of the
+UX is: *edit a rule, then edit code, and the new rule applies.* Not: *edit a rule and watch findings
+appear on their own.*
+
+### One sharp edge
+
+[`ast-grep/ast-grep#722`](https://github.com/ast-grep/ast-grep/issues/722) (open): on reload, ast-grep
+**silently ignores an invalid rule** — no error, no warning. So saving a half-written YAML rule can make
+diagnostics quietly *vanish* rather than error. If a rule stops firing for no reason, run `ast-grep scan`
+on the CLI: a fresh process reads current rules and will actually tell you the rule is broken.
+
+### Turning it off
+
+`LSP_SHIM_DISABLE=1` bypasses the shim entirely and runs `ast-grep lsp` unproxied — 0.3.1's behaviour,
+without downgrading. It exists because a shim in the hot path of every LSP message should always have
+an off switch that does not require shipping a fix.
 
 ## Which file types it claims, and why that is a rule rather than a taste
 
@@ -163,12 +230,17 @@ a **feedback** layer, never the contract layer.
 ## Verifying it works
 
 ```
-node verify-lsp.mjs [path/to/project]
+npm run check          # all of the below
 ```
 
-Drives the real language server over stdio and asserts that a buffer violating one of *your* rules
-produces a diagnostic carrying that rule's id — and, crucially, that the **fixed** buffer clears it. A
-check that only asserts the error case cannot tell a working linter from one that fires on everything.
+| Check | What it proves |
+|---|---|
+| `check:lsp` | Drives the real server over stdio: a buffer violating one of *your* rules produces a diagnostic carrying that rule's id — **and the fixed buffer clears it**. The second half is what makes it an oracle; a check that only asserts the error case cannot tell a working linter from one that fires on everything. |
+| `check:reload` | Rule hot-reload, end to end. Asserts the **bare** server ignores a rule change (the bug), then that the shim flips it. |
+| `check:unit` | The framing and watcher internals — byte-vs-char `Content-Length`, streams split mid-header, malformed headers degrading to a raw pipe instead of wedging. |
+| `check:extensions` | That this plugin claims no extension an official language server owns. `--refresh` re-derives that list from the marketplace on your machine, so the rule cannot quietly rot. |
+
+`node verify-lsp.mjs [path/to/project]` also runs standalone against any project with an `sgconfig.yml`.
 
 ## License
 
