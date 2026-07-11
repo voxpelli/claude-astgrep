@@ -105,20 +105,32 @@ and the server re-analyses it instantly, correct line numbers and all — while 
 all. Two channels; only one is wired. The plugin looks healthy while being half deaf, and you conclude
 your *rule* is wrong rather than unloaded.
 
-**Whose fault is it? Not, it turns out, the client's.** LSP 3.17 makes dynamic registration *opt-in*:
+**Except it was never actually silent — and this is the part worth knowing.** ast-grep *notices* the
+refusal and reports it, immediately, naming the exact cause:
 
-> *"Not all clients need to support dynamic capability registration. A client opts in via the
-> `dynamicRegistration` property on the specific client capabilities."* … *"If a server wants to support
-> both static and dynamic registration it needs to check the client capability in the initialize
-> request."*
+```
+[window/logMessage ERROR] Failed to register file watchers:
+    Error { code: MethodNotFound, message: "Unhandled method client/registerCapability" }
+```
 
-Measured here: **Claude Code advertises `didChangeWatchedFiles.dynamicRegistration` as `undefined`.** It
-never opts in — which the spec expressly permits — so it is never obliged to honour a registration.
-**ast-grep registers anyway, without checking.** That is the actual conformance defect, and it is why
-`rust-analyzer` and `pyright`, which *do* check and fall back to self-watching, work fine in Claude Code
-while ast-grep does not.
+**Claude Code discards that message.** It surfaces a server's *stderr*, but not its `window/logMessage` —
+72 KB of `--debug` output from a live session contains not one, not even the routine `INFO` lines the same
+server emits on every startup. So the diagnosis was being broadcast on the first handshake and thrown
+away, and the better part of a day went into rediscovering it by hand. **That** is the real bug here.
 
-None of which helps you as a user: the client-side feature is genuinely absent, and it is not coming —
+**Whose fault is the rest? Less clear-cut than it looks, and not really ast-grep's.** LSP 3.17 makes
+dynamic registration opt-in — *"Not all clients need to support dynamic capability registration. A client
+opts in via the `dynamicRegistration` property"* — and Claude Code advertises that property as
+`undefined`, which the spec expressly permits. ast-grep registers anyway without checking, which is
+impolite but **not a clear violation**: the only imperative in that spec section is scoped to servers
+supporting *both* static and dynamic registration, and `didChangeWatchedFiles` has **no static path at
+all**. Asking, and being refused, is a legitimate outcome — and ast-grep handles the refusal correctly.
+
+What ast-grep lacks is a **fallback**: `rust-analyzer` and `pyright` check the capability, see it absent,
+and watch the files themselves. That is the fix, and it is why they work in Claude Code and ast-grep does
+not. See `UPSTREAM-brew--ast-grep.md`.
+
+Meanwhile the client-side feature is genuinely absent and is not coming —
 [`anthropics/claude-code#32595`](https://github.com/anthropics/claude-code/issues/32595) and its re-file
 `#52693` are both **closed as NOT_PLANNED**. Hence the shim.
 

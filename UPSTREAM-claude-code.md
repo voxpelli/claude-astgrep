@@ -19,7 +19,17 @@
 
 ## Bugs
 
-*No entries yet.* — the `registerCapability` item that lived here was **refiled above as a Feature Request** on 2026-07-11, after checking the spec: the client never advertises the capability, so it is not obliged to honour the registration. The spec violation is on ast-grep's side.
+- **`window/logMessage` from LSP servers is discarded — a server's own error reporting never reaches anyone, not even under `--debug`** (2026-07-11) \[degraded] — Claude Code surfaces a language server's **stderr** (it appears in `--debug-file` as `[LSP SERVER …]`) but appears to drop `window/logMessage` and never show it anywhere. So a server that reports a problem *through the protocol*, as the protocol intends, is reporting it into a void.
+  **This is the bug that actually costs people time, and it hid all the others.** Rule hot-reload was investigated here for the better part of a day — waiting on suspected LSP lag, touching files, diffing a stale diagnostic message against freshly-correct line numbers — to work out *why* ast-grep silently stopped reloading rules. **It was never silent.** ast-grep detects the failed registration and announces it, with the exact cause. Claude Code binned it.
+  **Reproduction** (drive `ast-grep lsp` over stdio, reply `-32601` to `client/registerCapability` exactly as Claude Code does — the server says):
+  ```
+  [window/logMessage ERROR] Failed to register file watchers:
+      Error { code: MethodNotFound, message: "Unhandled method client/registerCapability", data: None }
+  ```
+  **And in a real Claude Code session, that channel is empty:** 72 KB of `--debug-file` output from a run with `ast-grep lsp` attached contains **zero** `window/logMessage` entries — not the `ERROR` above, and not even the routine `INFO` ones the same server emits on every startup (`"server initialized!"`, `"Starting rule reload..."`, `"Rules reloaded successfully"`). The messages are produced; they do not arrive.
+  Impact is not specific to ast-grep: `window/logMessage` is *the* standard way a language server tells its client something went wrong (missing toolchain, unreadable config, failed indexing). Dropping it means **every** LSP failure in Claude Code presents as unexplained silence, and every user has to reverse-engineer what the server would simply have told them. At minimum it belongs in `--debug`, next to the stderr that already appears there.
+  Not yet checked: whether `window/showMessage` (the user-visible variant — ast-grep uses it for "Failed to load rules") is dropped too. Likely the same path.
+  Severity: degraded · Ownership: upstream · Workaround: **partial** — read the server's stderr via `claude --debug-file`, which *is* surfaced. That only helps for servers that also log to stderr; a server that reports exclusively via `window/logMessage`, as the protocol invites, is invisible.
 
 ## Upstream Opportunities
 
