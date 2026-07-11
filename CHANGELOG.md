@@ -90,9 +90,12 @@ by fixing it, rather than by re-describing it.
   / `clangd` are NOT broken in Claude Code** — they respect the capability and self-watch. An earlier
   draft of the upstream notes speculated they were silently broken; they are not, and the correction is
   recorded rather than quietly deleted.
-- The shim makes the *server* current; it does not make Claude Code re-surface diagnostics on its own.
-  Claude Code injects diagnostics after a **file edit**, so the honest UX is *edit a rule, then edit
-  code, and the new rule applies.*
+- **Correction (verified live, 2026-07-11): editing a rule is enough — no second edit needed.** The
+  0.4.0/0.4.1 notes claimed the UX was *"edit a rule, then edit code, and the new rule applies"*. That
+  undersold it. Editing the rule *is itself* a file edit, and Claude Code surfaces diagnostics after any
+  edit, so the updated findings appear immediately against already-open code. The caveat only bites when
+  the rules change with **no** edit from Claude (a `git pull`, or an edit made in another editor): the
+  server reloads correctly and silently, and the new findings wait for the next edit to be shown.
 - `ast-grep/ast-grep#722` (open) is a sharp edge worth knowing: ast-grep **silently ignores an invalid
   rule** on reload, so saving half-written YAML makes diagnostics quietly vanish rather than error.
 

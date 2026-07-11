@@ -154,20 +154,24 @@ Claude Code  <--stdio-->  lsp-shim  <--stdio-->  ast-grep lsp
    ast-grep reloads its rules and re-publishes diagnostics for every open document on its own.
 
 **It knows nothing about ast-grep.** It spawns `argv[0]`; it watches whatever globs the *server* asked
-for. That is deliberate — the same shim would unbreak `csharp-lsp` and `elixir-lsp`, which are shipped
-in Anthropic's own marketplace and, unlike ast-grep, **block** on that unanswered request and hang
-outright. It is written to be extracted into its own plugin once a second one needs it.
+for. That's not ambition — it's simply less code than hardcoding ast-grep would be, and it keeps the shim
+easy to delete when ast-grep no longer needs it.
 
 `npm run check:reload` proves it end to end, and proves the bug first: it asserts the **bare** server
 ignores a rule change, then that the same server behind the shim emits an **unprompted**
 `publishDiagnostics` carrying the new rule's message — with no `didChange` and no request of any kind.
 
-### What it does *not* do
+### What that looks like in practice
 
-It makes the **server** current; it does not make Claude Code re-surface diagnostics spontaneously.
-Claude Code injects diagnostics into context **after a file edit**. So the honest description of the
-UX is: *edit a rule, then edit code, and the new rule applies.* Not: *edit a rule and watch findings
-appear on their own.*
+**Edit a rule. That's it.** The updated diagnostics surface immediately, against the code you already
+have open — no restart, and no need to go and touch a source file to "wake it up".
+
+The mechanism is worth knowing, because it explains the one case where nothing appears. Claude Code
+surfaces diagnostics **after a file edit** — and editing the rule *is* a file edit, which is why saving a
+rule is enough on its own. But if the rules change *without* an edit from Claude — you pull a branch, or
+edit a rule in another editor — the server reloads correctly and quietly, and you will not see the new
+findings until the next edit. Nothing is broken; the diagnostics are simply waiting for a moment to be
+shown.
 
 ### One sharp edge
 
