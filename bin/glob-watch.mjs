@@ -79,10 +79,11 @@ export function globToRegExp (glob) {
  *
  *   - A burst (Save All, `git checkout`, a formatter): the leading flush reloads with only the first
  *     file's changes; the trailing one reloads with all of them.
- *   - A truncate-then-write saver: the leading flush can catch a file mid-write, and `ast-grep`
- *     SILENTLY IGNORES an invalid rule (ast-grep/ast-grep#722, open) — so a torn read makes rules
- *     quietly vanish. The trailing flush re-reads the finished file and restores them. The failure is
- *     self-healing, a few hundred ms wide, rather than sticky.
+ *   - A truncate-then-write saver: the leading flush can catch a file mid-write. ast-grep DOES report a
+ *     broken rule (it emits window/showMessage AND window/logMessage, and keeps the last-known-good
+ *     ruleset) — but Claude Code registers no handler for either, so in this client the report goes
+ *     nowhere and the user just sees diagnostics change. The trailing flush re-reads the finished file
+ *     and restores them, so the failure is self-healing, a few hundred ms wide, rather than sticky.
  *
  * `maxWait` is the anti-stall ceiling: an unbroken stream of changes would otherwise reset the
  * debounce forever and the server would never hear about anything after the leading flush.

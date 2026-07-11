@@ -127,10 +127,16 @@ also permitted: `didChangeWatchedFiles` has **no static path at all**, so asking
 a legitimate outcome, and ast-grep handles the refusal correctly. The gap is between the two designs, not
 inside either one.
 
-What ast-grep lacks is a **fallback**. `rust-analyzer` and `pyright` check the capability, see it absent,
-and watch the files themselves — which is exactly why they work here and ast-grep doesn't. That's the
-real fix, it's entirely server-side, and it would let this shim be deleted. See
+What ast-grep lacks is a **fallback**. **`rust-analyzer`** checks the capability, sees it absent, and
+watches the files itself — `config.rs` gates its client-watching default behind
+`did_change_watched_files_dynamic_registration()` and otherwise drops to `FilesWatcher::Server`. That is
+the real fix: entirely server-side, and it would let this shim be deleted. See
 `UPSTREAM-brew--ast-grep.md`.
+
+*(An earlier version of this README also claimed **pyright** does this. **It does not** — its language
+server checks the capability and correctly declines to register, but has no fallback at all; the real
+OS-level watcher is wired only into the standalone CLI, never into `server.ts`. Pyright misses on-disk
+changes in Claude Code exactly as ast-grep does. Corrected rather than quietly deleted.)*
 
 Until then the client-side capability is absent and doesn't look imminent —
 [`anthropics/claude-code#32595`](https://github.com/anthropics/claude-code/issues/32595) and its re-file
@@ -173,11 +179,26 @@ edit a rule in another editor — the server reloads correctly and quietly, and 
 findings until the next edit. Nothing is broken; the diagnostics are simply waiting for a moment to be
 shown.
 
-### One sharp edge
+### One sharp edge — and it is not ast-grep's fault
 
-[`ast-grep/ast-grep#722`](https://github.com/ast-grep/ast-grep/issues/722) (open): on reload, ast-grep
-**silently ignores an invalid rule** — no error, no warning. So saving a half-written YAML rule can make
-diagnostics quietly *vanish* rather than error. If a rule stops firing for no reason, run `ast-grep scan`
+**Save a syntactically broken rule and your diagnostics will quietly vanish.** Not because ast-grep is
+silent about it — it isn't — but because Claude Code cannot hear it.
+
+Reproduced against ast-grep 0.44.1: an invalid rule on reload produces **both** a `window/showMessage`
+\[ERROR] *and* a `window/logMessage` \[ERROR] reading `Failed to load rules: Cannot parse rule …`, and the
+last-known-good rules stay in effect. `window/showMessage` is the method LSP defines specifically for
+*"show this to the user."*
+
+**Claude Code has no handler for either.** It registers exactly one notification handler on a plugin
+language server — `textDocument/publishDiagnostics` — and discards everything else at protocol dispatch.
+So ast-grep's error report is produced, correctly, and goes nowhere.
+
+*(An earlier version of this README blamed [`ast-grep#722`](https://github.com/ast-grep/ast-grep/issues/722)
+for "silently ignoring invalid rules". That is **wrong on current versions** — #722's own reproduction no
+longer reproduces, and ast-grep reports the failure on two channels. The maintainer who closed it saying
+*"sounds like an LSP client feature to me"* was right.)*
+
+If a rule stops firing for no reason, run `ast-grep scan`
 on the CLI: a fresh process reads current rules and will actually tell you the rule is broken.
 
 ### Turning it off, and turning it up
@@ -210,11 +231,16 @@ and it needs nothing from Anthropic:
 > **When the client does not advertise `workspace.didChangeWatchedFiles.dynamicRegistration`, watch the
 > rule files yourself.**
 
-That's exactly what **rust-analyzer** does (`files.watcher: "client" | "server"`) and what **pyright**
-does — and it's why *they* are unaffected by this in Claude Code while ast-grep isn't. Measured here:
-**Claude Code advertises that capability as `undefined`**, which is the honest thing for a client that
-doesn't watch files. So the signal a fallback would key on is already sitting in `initialize`; it just
-isn't consulted yet.
+**`rust-analyzer` already does exactly this** — verified in `crates/rust-analyzer/src/config.rs`: its
+`files.watcher` default of `Client` is gated on `did_change_watched_files_dynamic_registration()`, and
+falls through to `FilesWatcher::Server` (a real `notify` watcher) when the capability is absent. Not a
+manual opt-in — an automatic fallback. **gopls** shipped a server-side watcher in v0.22.0 but it defaults
+to `off` and its source carries a literal `// TODO: support "auto" mode`, so the maintainers are building
+toward the same thing and haven't automated the trigger yet.
+
+Measured here: **Claude Code advertises that capability as `undefined`**, which is the honest thing for a
+client that doesn't watch files. So the signal a fallback would key on is already sitting in `initialize`;
+it just isn't consulted yet.
 
 **Retirement trigger: ast-grep ships a self-watch fallback.** On that day this shim becomes dead code
 and `plugin.json` goes back to invoking `ast-grep` directly — which also drops the Node requirement.

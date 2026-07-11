@@ -4,6 +4,53 @@ All notable changes to `vp-astgrep` are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.4.2 — 2026-07-11
+
+**Docs only. No code changes — the shim is unchanged and still works.** An adversarial review of every
+claim in this repo (against source, binaries and live reproduction, rather than issue titles and memory)
+refuted four of them. All four had already shipped. They are corrected in place rather than deleted.
+
+### Fixed — four claims that were wrong
+
+- **❌ "rust-analyzer and pyright both self-watch when the client can't."** **pyright does not.** Its LSP
+  server checks the capability and correctly declines to register — and then has *no fallback at all*; the
+  real OS-level watcher (chokidar) is wired only into the standalone CLI, never `server.ts`. Pyright misses
+  on-disk changes in Claude Code exactly as ast-grep does. **rust-analyzer is confirmed** (`config.rs` gates
+  its `Client` default on `did_change_watched_files_dynamic_registration()` and otherwise drops to
+  `FilesWatcher::Server`). **gopls** shipped a server-side watcher in v0.22.0 but it defaults to `off` and
+  carries a literal `// TODO: support "auto" mode`. Honest claim: *one* strong precedent, plus a direction
+  of travel — not an industry norm.
+
+- **❌ "ast-grep silently ignores an invalid rule (#722)" — and this one inverts.** Written into the README,
+  this CHANGELOG, a source comment and the upstream notes **on the strength of an issue title.** Reproduced
+  against 0.44.1: an invalid rule emits **both** `window/showMessage` \[ERROR] *and* `window/logMessage`
+  \[ERROR], and the last-known-good ruleset stays in effect. Not silent. #722's own reproduction no longer
+  reproduces (ast-grep now derives a missing `id:` from the filename). **The silence is Claude Code's** — it
+  registers no handler for either method. The maintainer who closed #722 with *"sounds like an LSP client
+  feature to me"* was right, and we nearly filed a bug against ast-grep for the client's defect.
+
+- **❌ "csharp-lsp and elixir-lsp hang, and both ship in Anthropic's marketplace."** Both halves false. The
+  request *is* answered (`-32601`, measured on the wire), so a blocking server unblocks; the "hangs forever"
+  language traces to two 2026-03/04 reports that inferred silence from symptoms **with no byte trace**, and
+  was then propagated by a downstream plugin README. And `elixir-lsp` is third-party, not Anthropic's. The
+  real failure is server-side handling of the *error response* (csharp-ls aborts its solution load; Roslyn
+  throws; PowerShell times out at ~30s).
+
+- **❌ "whether a dead server starves its extension is undocumented."** It is documented, and it splits three
+  ways: registration-time config failure → **fixed in v2.1.205**; registers-then-dies → **still starved**
+  (the router reads only index 0 and never fails over) — *which is ast-grep's case, so our narrow extension
+  claim stays necessary*; two healthy servers → first-registered wins, by design.
+
+### Added — the `window/*` finding, now confirmed at source
+
+- Claude Code registers **exactly one** notification handler on a plugin LSP server —
+  `textDocument/publishDiagnostics` — and one request handler, `workspace/configuration`. `window/logMessage`
+  and `window/showMessage` exist in the binary **only as vendored protocol constants; there is no handler.**
+  Dispatch is by method name *before params are read*, so a severity filter is structurally impossible and
+  there is no headless-vs-interactive difference. **This is why nobody has reported it:** server→client
+  *requests* get a loud `-32601` and are already filed; server→client *notifications* are discarded with **no
+  artifact at all** — nothing to screenshot, nothing to grep.
+
 ## 0.4.1 — 2026-07-11
 
 ### Changed
@@ -48,9 +95,9 @@ by fixing it, rather than by re-describing it.
   rules and re-publishes diagnostics for every open document on its own.
 
   **It is server-agnostic on purpose.** It spawns `argv[0]` and watches whatever globs the *server*
-  registered; nothing in it knows what ast-grep is. The same unanswered request makes `csharp-lsp` and
-  `elixir-lsp` — both in Anthropic's own marketplace — **hang outright** rather than merely go stale, so
-  this is written to be extracted into its own plugin once a second one needs it.
+  registered; nothing in it knows what ast-grep is — that is simply less code than hardcoding ast-grep
+  would be. (An earlier version of this entry claimed the same request makes `csharp-lsp` and `elixir-lsp`
+  "hang outright", and that both ship in Anthropic's marketplace. **Both parts are false** — see 0.4.2.)
 
   Upstream is not going to fix this: `anthropics/claude-code#32595` and its re-file `#52693` are both
   closed as NOT_PLANNED.
@@ -79,25 +126,24 @@ by fixing it, rather than by re-describing it.
 
 - **The shim is a stopgap, and it is meant to die.** The durable fix is server-side in ast-grep — *when
   the client does not advertise `didChangeWatchedFiles.dynamicRegistration`, watch the rule files
-  yourself* — exactly as **rust-analyzer** and **pyright** already do, which is why they are immune to
-  this and ast-grep is not. It needs nothing from Anthropic. When it lands, this shim becomes dead code
+  yourself* — as **rust-analyzer** does. (This entry originally also credited **pyright**. It does not do
+  this; see 0.4.2.) It needs nothing from Anthropic. When it lands, this shim becomes dead code
   and `plugin.json` goes back to invoking `ast-grep` directly, dropping the Node requirement with it.
   Tracked in `UPSTREAM-brew--ast-grep.md`; **nothing has been filed upstream.**
 - **Measured, and new information: Claude Code advertises `workspace.didChangeWatchedFiles.dynamicRegistration
   = undefined`.** No public dump of its LSP capabilities existed. Two consequences: (1) the shim's
   capability injection is *load-bearing*, not defensive — a spec-compliant server would otherwise
-  correctly decline to register and the shim would see nothing; (2) **`rust-analyzer` / `pyright` / `gopls`
-  / `clangd` are NOT broken in Claude Code** — they respect the capability and self-watch. An earlier
-  draft of the upstream notes speculated they were silently broken; they are not, and the correction is
-  recorded rather than quietly deleted.
+  correctly decline to register and the shim would see nothing; (2) servers that *check* the capability
+  degrade politely rather than loudly — though only **rust-analyzer** actually self-watches as a fallback
+  (see 0.4.2; `pyright` does not, and we were wrong to say it did).
 - **Correction (verified live, 2026-07-11): editing a rule is enough — no second edit needed.** The
   0.4.0/0.4.1 notes claimed the UX was *"edit a rule, then edit code, and the new rule applies"*. That
   undersold it. Editing the rule *is itself* a file edit, and Claude Code surfaces diagnostics after any
   edit, so the updated findings appear immediately against already-open code. The caveat only bites when
   the rules change with **no** edit from Claude (a `git pull`, or an edit made in another editor): the
   server reloads correctly and silently, and the new findings wait for the next edit to be shown.
-- `ast-grep/ast-grep#722` (open) is a sharp edge worth knowing: ast-grep **silently ignores an invalid
-  rule** on reload, so saving half-written YAML makes diagnostics quietly vanish rather than error.
+- ~~`ast-grep/ast-grep#722`: ast-grep silently ignores an invalid rule on reload.~~ **RETRACTED in 0.4.2 —
+  this is false.** ast-grep reports an invalid rule on *two* channels; Claude Code discards both.
 
 ## 0.1.0 — 2026-07-11
 

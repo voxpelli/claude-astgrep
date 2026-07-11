@@ -18,19 +18,23 @@
 // `didChangeWatchedFiles` has no static path at all, so asking and being turned down is a legitimate
 // outcome. The gap is between the two designs, not inside either one.
 //
-// What ast-grep lacks is a FALLBACK. rust-analyzer and pyright check the capability, see it absent, and
-// watch the files themselves — which is why they work here and ast-grep doesn't. That fallback is the
-// real fix, and this shim is only the bridge to it.
+// What ast-grep lacks is a FALLBACK. rust-analyzer checks the capability, sees it absent, and watches
+// the files itself (config.rs gates its `Client` default on did_change_watched_files_dynamic_registration
+// and otherwise drops to FilesWatcher::Server). That fallback is the real fix; this shim is the bridge.
+// (pyright, which we once cited alongside it, does NOT do this — its LSP server checks the capability and
+// then simply has no fallback. It misses on-disk changes here exactly as ast-grep does.)
 //
 // AND THE FAILURE WAS NEVER SILENT — that part took a day to learn. ast-grep notices the refusal and
 // reports it accurately, over `window/logMessage`:
 //
 //     [ERROR] Failed to register file watchers: Error { code: MethodNotFound, ... }
 //
-// That message doesn't surface in Claude Code, which shows a server's stderr under --debug but not its
-// window/logMessage. So a precise, immediate error report reached nobody, and the whole thing presented
-// as "the rules just don't reload". That is exactly why this file's own logging is loud about faults and
-// quiet about success — having just been on the receiving end of the alternative.
+// Claude Code never hears it. It registers exactly ONE notification handler on a plugin language server —
+// textDocument/publishDiagnostics — and dispatches by method name before the params are ever read, so
+// window/logMessage and window/showMessage are discarded outright. A precise, immediate error report
+// reached nobody, and the whole thing presented as "the rules just don't reload". That is exactly why
+// this file's own logging is loud about faults and quiet about success: having just been on the receiving
+// end of the alternative, the least we can do is not reproduce it.
 //
 // anthropics/claude-code#32595 and its re-file #52693 are both CLOSED / NOT_PLANNED. A client-side
 // fix is not coming, which is what promotes this from a workaround to the only path — until ast-grep
@@ -43,7 +47,7 @@
 //     achieves nothing — the reply only says "registration accepted". We do it because (a) the
 //     registration payload is the source of truth for *what to watch*, so the watcher cannot rot when
 //     a server changes its patterns, (b) it stops the client's `-32601` reaching the server, and
-//     (c) it is what would unbreak csharp-lsp and elixir-lsp.
+//     (c) it generalises — any server that needs watched files gets them.
 //
 // SERVER-AGNOSTIC BY CONSTRUCTION. It spawns argv[0]; it watches whatever globs the server itself
 // registers. Nothing here knows what ast-grep is. That is deliberate — this wants to be extracted.
@@ -172,9 +176,10 @@ function main () {
     try { root = realpathSync(dir); } catch { root = dir; }
 
     // A free probe: nobody has published what Claude Code actually advertises here. If it OMITS
-    // dynamicRegistration, then servers that respect the capability (rust-analyzer, pyright) correctly
-    // decline to register and fall back to self-watching. If it ADVERTISES it and then answers -32601
-    // to the registration, that is a plain broken promise.
+    // dynamicRegistration, a server that respects the capability declines to register — and then either
+    // self-watches (rust-analyzer) or simply misses on-disk changes (pyright: it checks, but has no
+    // fallback). If a client ADVERTISES it and then answers -32601, that would be a broken promise.
+    // Measured: Claude Code advertises nothing, so it is honest — it just cannot help.
     const advertised = params.capabilities?.workspace?.didChangeWatchedFiles?.dynamicRegistration;
     debug(`client advertises workspace.didChangeWatchedFiles.dynamicRegistration = ${advertised}`);
     debug(`client capabilities: ${JSON.stringify(params.capabilities)}`);
@@ -220,8 +225,10 @@ function main () {
           .filter(Boolean);
         if (globs.length) registrations.set(reg.id, globs);
       }
-      // The reply the client owes and will not send. Without it a tower-lsp server merely goes stale;
-      // a blocking server hangs here forever.
+      // The reply Claude Code answers -32601 to. ast-grep survives that (it logs an error and carries on
+      // without watchers); other servers handle the error response less gracefully — csharp-ls aborts its
+      // solution load on a later unguarded request, and Kate's -32601 crashes phpactor's RPC layer
+      // outright (phpactor#1304). Answering properly sidesteps that whole class.
       toChild({ jsonrpc: '2.0', id, result: null });
       restartWatcher();
       return false; // Swallow: the client cannot handle it and would only answer -32601.
