@@ -47,6 +47,19 @@ by fixing it, rather than by re-describing it.
 
 ### Notes
 
+- **The shim is a stopgap, and it is meant to die.** The durable fix is server-side in ast-grep — *when
+  the client does not advertise `didChangeWatchedFiles.dynamicRegistration`, watch the rule files
+  yourself* — exactly as **rust-analyzer** and **pyright** already do, which is why they are immune to
+  this and ast-grep is not. It needs nothing from Anthropic. When it lands, this shim becomes dead code
+  and `plugin.json` goes back to invoking `ast-grep` directly, dropping the Node requirement with it.
+  Tracked in `UPSTREAM-brew--ast-grep.md`; **nothing has been filed upstream.**
+- **Measured, and new information: Claude Code advertises `workspace.didChangeWatchedFiles.dynamicRegistration
+  = undefined`.** No public dump of its LSP capabilities existed. Two consequences: (1) the shim's
+  capability injection is *load-bearing*, not defensive — a spec-compliant server would otherwise
+  correctly decline to register and the shim would see nothing; (2) **`rust-analyzer` / `pyright` / `gopls`
+  / `clangd` are NOT broken in Claude Code** — they respect the capability and self-watch. An earlier
+  draft of the upstream notes speculated they were silently broken; they are not, and the correction is
+  recorded rather than quietly deleted.
 - The shim makes the *server* current; it does not make Claude Code re-surface diagnostics on its own.
   Claude Code injects diagnostics after a **file edit**, so the honest UX is *edit a rule, then edit
   code, and the new rule applies.*

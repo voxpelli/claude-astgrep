@@ -157,18 +157,28 @@ on the CLI: a fresh process reads current rules and will actually tell you the r
 without downgrading. It exists because a shim in the hot path of every LSP message should always have
 an off switch that does not require shipping a fix.
 
-### It is meant to leave
+### It is a stopgap, and it is meant to die
 
-`bin/lsp-shim.mjs` is written server-agnostic so that extracting it is a **move, not a rewrite**. It
-lives here only because ast-grep is the first thing that needed it.
+**The shim is a bridge, not a product.** The real fix belongs in ast-grep, it is entirely server-side,
+and it needs nothing from Anthropic:
 
-**Extraction trigger:** a second plugin needs it, *or* someone wants `csharp-lsp` / `elixir-lsp`
-unhung. Likely home: a `vp-lsp-shim` plugin in the same marketplace, which other LSP plugins wrap.
+> **When the client does not advertise `workspace.didChangeWatchedFiles.dynamicRegistration`, watch the
+> rule files yourself.**
 
-Until then, the discipline that keeps it extractable is worth stating, because it is easy to lose by
-accident: **nothing in `bin/` may know what ast-grep is.** It spawns `argv[0]`. It watches the globs the
-*server* registered. It hardcodes no file extension, no config filename, no rule directory. The moment
-one `if (command === 'ast-grep')` appears, the extraction stops being free.
+That is exactly what **rust-analyzer** does (`files.watcher: "client" | "server"`) and what **pyright**
+does — and it is why *they* are immune to this in Claude Code while ast-grep is not. Measured here:
+**Claude Code advertises that capability as `undefined`.** It is honest about not watching files. The
+signal a fallback would key on is already there, and is currently ignored — while ast-grep registers its
+watchers unconditionally anyway, asking a client that has openly said it cannot watch files to watch
+files, and then trusting the silence.
+
+**Retirement trigger: ast-grep ships a self-watch fallback.** On that day this shim becomes dead code
+and `plugin.json` goes back to invoking `ast-grep` directly — which also drops the Node requirement.
+Tracked in `UPSTREAM-brew--ast-grep.md`. **Nothing has been filed upstream.**
+
+Until then, one discipline keeps the stopgap cheap: **nothing in `bin/` knows what ast-grep is.** It
+spawns `argv[0]` and watches the globs the *server* registered. That is not ambition — hardcoding
+ast-grep would be strictly *more* code, and it would make the shim harder to delete later, not easier.
 
 ## Which file types it claims, and why that is a rule rather than a taste
 
@@ -254,6 +264,30 @@ npm run check          # all of the below
 | `check:extensions` | That this plugin claims no extension an official language server owns. `--refresh` re-derives that list from the marketplace on your machine, so the rule cannot quietly rot. |
 
 `node verify-lsp.mjs [path/to/project]` also runs standalone against any project with an `sgconfig.yml`.
+
+### Verifying it live, without publishing
+
+`--plugin-dir` loads a plugin straight from a working copy for that session, and **takes precedence over
+the installed marketplace copy of the same name** — so there is no need to uninstall or disable anything,
+and nothing has to be pushed:
+
+```
+claude --plugin-dir /path/to/vp-astgrep --debug-file /tmp/cc.log
+```
+
+The shim writes its state to stderr, which Claude Code surfaces in the debug log:
+
+```
+[LSP SERVER …] [lsp-shim] client advertises workspace.didChangeWatchedFiles.dynamicRegistration = undefined
+[LSP SERVER …] [lsp-shim] injected workspace.didChangeWatchedFiles.dynamicRegistration=true
+[LSP SERVER …] [lsp-shim] watching /path/to/project for "**/*.{yml,yaml}"
+[LSP SERVER …] [lsp-shim] reload: 1 watched file(s) changed        <- a rule changed; the server was told
+```
+
+**LSP servers start lazily**, on the first edit to a file whose extension the plugin claims — so grep the
+log *after* editing something, not at startup. To see a reload you must edit code **first** (which starts
+the server), *then* the rule: editing the rule first merely starts the server, which reads the new rule at
+boot and proves nothing.
 
 ## License
 
