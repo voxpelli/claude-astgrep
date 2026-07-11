@@ -73,8 +73,7 @@ Rule files are watched — edit a rule and diagnostics update without a restart.
 
 ## Which file types it claims, and why that is a rule rather than a taste
 
-ast-grep is polyglot — it supports **28 languages**. This plugin claims **25 extensions**, and the line
-it draws is deliberate.
+ast-grep is polyglot — it supports **28 languages**. This plugin claims **7 extensions**, on purpose.
 
 Claude Code requires a **static** `extensionToLanguage` map: no wildcards, no globs, no computed
 config, no per-project override, and no way to influence precedence. And when two enabled LSP servers
@@ -82,28 +81,39 @@ claim the same extension, **the first registered wins and the others never start
 ([plugins reference](https://code.claude.com/docs/en/plugins-reference)). So **every extension this
 plugin claims is one it may be taking away from a real language server.**
 
-Claude Code's official LSP plugins together claim 31 extensions. Those split ast-grep's 28 languages
-into **15 contested** and **13 uncontested**. The rule:
+The rule:
 
-> **Claim only what no official language server wants — plus the JavaScript family, which is a
-> deliberate, documented contest.**
+> **Claim what you actually lint. Nothing else.**
 
-**Claimed (free by construction — nothing else wants them):**
-`.sh .bash .zsh` · `.css .scss` · `.html .htm` · `.json` · `.yaml .yml` · `.md` ·
-`.tf .tfvars .hcl` · `.nix` · `.ex .exs` · `.dart` · `.hs` · `.scala` · `.sol`
+**Claimed:** `.js .mjs .cjs .jsx` (javascript) · `.sh .bash .zsh` (bash) — the exact set of `language:`
+values declared by the rules this plugin serves.
 
-**Claimed on purpose, and contested:** `.js .mjs .cjs .jsx` — `typescript-lsp` also claims these. We
-claim them anyway because JavaScript structural rules are this plugin's reason to exist. **If you run
-`typescript-lsp` too, the two may be mutually exclusive on `.js`.** `/plugin` names the winner.
+The tempting weaker rule is "claim anything no official Claude Code server has claimed yet". That is a
+worse rule, and it is worth saying why: popular language servers exist for `.tf`, `.nix`, `.json`,
+`.yaml`, `.md`, `.css` and `.html` too — any of them could ship as a third-party plugin tomorrow, and a
+greedy map here would silently kill it. **The official list tells you what is contested today; it
+cannot tell you what is contested tomorrow.** An extension you have no rules for buys you nothing and
+costs a language server someone may want. Coverage is not the thing to maximise; **blast radius is the
+thing to minimise.**
 
-**Not claimed:** `.ts .tsx .py .rs .go .java .rb .php .c .cpp .h .cs .lua .kt .swift`. Claiming these
-would silently disable `pyright-lsp` / `rust-analyzer-lsp` / `gopls-lsp` / `jdtls-lsp` and friends. **A
-plugin that quietly breaks another plugin is the worst kind of plugin.** Add one only for a language
-whose real server you are certain you do not want.
+**Deliberately contested:** `.js .mjs .cjs .jsx` — `typescript-lsp` claims these too. We claim them
+anyway, because JavaScript structural rules are this plugin's reason to exist. **If you run
+`typescript-lsp` as well, the two may be mutually exclusive on `.js`.** `/plugin` names the winner.
+That trade is stated here rather than hidden.
 
-`check-extensions.mjs` enforces this on every `npm run check`, and `--refresh` re-derives the official
-claim list from the marketplace on your machine, so the rule cannot quietly rot as Anthropic ships new
-language servers.
+**Never claimed:** `.ts .tsx .py .rs .go .java .rb .php .c .cpp .h .cs .lua .kt .swift` — all owned by
+official language servers. Claiming them would silently disable `pyright-lsp` / `rust-analyzer-lsp` /
+`gopls-lsp` / `jdtls-lsp`. **A plugin that quietly breaks another plugin is the worst kind of plugin.**
+
+`check-extensions.mjs` enforces both rules on every `npm run check` and fails the build on a violation.
+Its `--refresh` flag re-derives the official claim list from the marketplace on your machine, so it
+cannot quietly rot as Anthropic ships new language servers.
+
+### Adding a language
+
+Add a **rule** for it first, then widen `ALLOWED` in `check-extensions.mjs` and the map in
+`plugin.json`. Never the other way round — and check first whether a real language server wants that
+extension, because you will be taking it from them.
 
 ### Why it can't be dynamic
 

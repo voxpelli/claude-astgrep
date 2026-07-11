@@ -48,6 +48,25 @@ const OFFICIAL = {
 // README. Every OTHER contested extension is a bug.
 const DELIBERATE_CONTEST = new Set(['.js', '.mjs', '.cjs', '.jsx']);
 
+// THE ALLOWLIST IS THE REAL RULE, and it is stricter than "not claimed by an official server".
+//
+// "Uncontested by Claude Code's official marketplace" is a weaker guarantee than it sounds: popular
+// language servers exist for .tf, .nix, .json, .yaml, .md, .css and .html, and any of them could ship
+// as a third-party plugin tomorrow — at which point a greedy map here would silently kill it. The
+// official list tells you what is contested TODAY; it cannot tell you what is contested tomorrow.
+//
+// So the rule is not "claim everything nobody has claimed yet". It is: CLAIM WHAT YOU ACTUALLY LINT.
+// An extension you have no rules for buys you exactly nothing, and costs a language server you or
+// someone else may want later. Blast radius is the thing to minimise, not coverage.
+//
+// This set is the union of the `language:` values actually declared by the rules in the projects this
+// plugin serves (javascript, bash). To add a language: add a rule for it FIRST, then widen this list.
+// Never the other way round.
+const ALLOWED = new Set([
+  '.js', '.mjs', '.cjs', '.jsx',     // javascript
+  '.sh', '.bash', '.zsh',            // bash
+]);
+
 if (process.argv.includes('--refresh')) {
   const mp = path.join(process.env.HOME, '.claude/plugins/marketplaces/claude-plugins-official/.claude-plugin/marketplace.json');
   if (!existsSync(mp)) {
@@ -70,17 +89,23 @@ if (process.argv.includes('--refresh')) {
 }
 
 let failed = false;
-const bad = claimed.filter((e) => e in OFFICIAL && !DELIBERATE_CONTEST.has(e));
 
-for (const e of bad) {
+// (1) The hard rule: never take an extension away from an official language server.
+for (const e of claimed.filter((x) => x in OFFICIAL && !DELIBERATE_CONTEST.has(x))) {
   console.log(`  FAIL  ${e} is owned by ${OFFICIAL[e]} — claiming it would stop that server from ever starting`);
   failed = true;
 }
 
+// (2) The stricter rule: claim only what we actually lint. An extension with no rules behind it is
+// pure blast radius — it can only ever cost someone a language server they wanted.
+for (const e of claimed.filter((x) => !ALLOWED.has(x))) {
+  console.log(`  FAIL  ${e} is not in the allowlist — add a rule for that language FIRST, then widen ALLOWED`);
+  failed = true;
+}
+
 const contested = claimed.filter((e) => DELIBERATE_CONTEST.has(e));
-console.log(`  claimed         : ${claimed.length} extensions`);
-console.log(`  uncontested     : ${claimed.length - contested.length}  (no official server wants these — free by construction)`);
-console.log(`  deliberate      : ${contested.length}  (${contested.join(' ')} — contests typescript-lsp; documented in README)`);
-console.log(`  ${failed ? 'FAIL' : 'PASS'}            : ${failed ? `${bad.length} extension(s) would silently disable an official language server` : 'no extension silently disables an official language server'}`);
+console.log(`  claimed    : ${claimed.length} extensions (${claimed.join(' ')})`);
+console.log(`  contested  : ${contested.length}  (${contested.join(' ')} — deliberate; contests typescript-lsp, see README)`);
+console.log(`  ${failed ? 'FAIL' : 'PASS'}       : ${failed ? 'the map claims something it should not' : 'claims only what it lints, and takes nothing from an official server'}`);
 
 process.exit(failed ? 1 : 0);

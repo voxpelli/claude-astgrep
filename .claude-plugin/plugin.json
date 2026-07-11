@@ -21,29 +21,7 @@
 
         ".sh": "shellscript",
         ".bash": "shellscript",
-        ".zsh": "shellscript",
-
-        ".css": "css",
-        ".scss": "scss",
-        ".html": "html",
-        ".htm": "html",
-
-        ".json": "json",
-        ".yaml": "yaml",
-        ".yml": "yaml",
-        ".md": "markdown",
-
-        ".tf": "terraform",
-        ".tfvars": "terraform",
-        ".hcl": "hcl",
-        ".nix": "nix",
-
-        ".ex": "elixir",
-        ".exs": "elixir",
-        ".dart": "dart",
-        ".hs": "haskell",
-        ".scala": "scala",
-        ".sol": "solidity"
+        ".zsh": "shellscript"
       },
       "startupTimeout": 15000
     }

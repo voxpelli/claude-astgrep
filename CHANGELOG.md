@@ -27,24 +27,36 @@ Initial release.
 
 ### Added
 
-- **Claims 25 extensions, up from 4.** ast-grep is polyglot (28 languages); v0.1.0 claimed only the
-  JavaScript family, which meant `bash` rules — used by real projects — got no live diagnostics at all.
-- **`check-extensions.mjs`**, wired into `npm run check`. Claude Code requires a *static*
-  `extensionToLanguage` map and, when two enabled LSP servers claim one extension, **the first
-  registered wins and the others never start**. So every extension claimed is one that may be taken
-  away from a real language server. The guard enforces the rule: **claim only what no official Claude
-  Code language server wants — plus the JavaScript family, a deliberate and documented contest with
-  `typescript-lsp`.** `--refresh` re-derives the official claim list from the marketplace on the
-  machine, so the rule cannot rot as Anthropic ships new servers.
+- **Claims bash (`.sh` `.bash` `.zsh`) alongside the JavaScript family — 7 extensions, up from 4.**
+  ast-grep is polyglot (28 languages) and v0.1.0 claimed only JavaScript, so `bash` rules — which real
+  projects here actually have — got no live diagnostics at all.
+- **`check-extensions.mjs`**, wired into `npm run check`, enforcing two rules and failing the build on
+  either:
+  1. **Never take an extension from an official language server.** When two enabled LSP servers claim
+     one extension, the first registered wins and the others *never start*, so a greedy map would
+     silently disable `pyright-lsp` / `rust-analyzer-lsp` / `gopls-lsp`. (`--refresh` re-derives the
+     official claim list from the marketplace on the machine, so this cannot rot as Anthropic ships new
+     servers.)
+  2. **Claim only what you actually lint.** Stricter, and the load-bearing one. "Uncontested by the
+     official marketplace" is a weaker guarantee than it sounds: popular servers exist for `.tf`,
+     `.nix`, `.json`, `.yaml`, `.md`, `.css`, `.html` too, and any could ship as a third-party plugin
+     tomorrow. The official list tells you what is contested *today*, not tomorrow. An extension with
+     no rules behind it buys nothing and costs a language server someone may want. **Coverage is not
+     the thing to maximise; blast radius is the thing to minimise.**
+
+  An earlier draft of this release claimed 25 extensions on rule 1 alone. Rule 2 cut it to 7.
 
 ### Notes
 
-Targeting **cannot** be made dynamic, and this was checked rather than assumed: Claude Code supports no
-wildcards, no computed LSP config, no per-project override, and no way to influence collision
-precedence. A static map also can never be *complete* — `customLanguages` in `sgconfig.yml` lets a
-project register a tree-sitter grammar under arbitrary extensions no plugin-side map can anticipate.
+Targeting **cannot** be made dynamic — checked, not assumed. Claude Code supports no wildcards, no
+computed LSP config, no per-project override, and no way to influence collision precedence. A static map
+can also never be *complete*: `customLanguages` in `sgconfig.yml` lets a project register a tree-sitter
+grammar under arbitrary extensions no plugin-side map can anticipate.
 
-The correct set is per-project (exactly the `language:` values in that project's own rules, which is
-mechanically derivable) — but there is no mechanism to express that. ast-grep's own VSCode extension
-sidesteps the problem by claiming *every* file (`language: '*'`) and gating on `sgconfig.yml`; Claude
-Code offers no equivalent.
+The genuinely correct set is per-project — exactly the `language:` values in that project's own rules,
+which *is* mechanically derivable — but there is no mechanism to express it. ast-grep's own VSCode
+extension sidesteps the problem by claiming *every* file (`language: '*'`) and gating on `sgconfig.yml`
+instead; Claude Code offers no equivalent.
+
+Upstream detail worth recording: ast-grep's server **ignores the `languageId`** the client sends and
+re-detects the language from the file path, so only the map's *keys* matter — the values are cosmetic.
