@@ -73,41 +73,45 @@ Rule files are watched — edit a rule and diagnostics update without a restart.
 
 ## Which file types it claims, and why that is a rule rather than a taste
 
-ast-grep is polyglot — it supports **28 languages**. This plugin claims **7 extensions**, on purpose.
+ast-grep is polyglot — it supports **28 languages**. This plugin claims **15 extensions**, and stops
+there on purpose.
 
 Claude Code requires a **static** `extensionToLanguage` map: no wildcards, no globs, no computed
 config, no per-project override, and no way to influence precedence. And when two enabled LSP servers
 claim the same extension, **the first registered wins and the others never start**
 ([plugins reference](https://code.claude.com/docs/en/plugins-reference)). So **every extension this
-plugin claims is one it may be taking away from a real language server.**
+plugin claims is one it may be taking away from a real language server.** Coverage is not the thing to
+maximise here — **blast radius is the thing to minimise.**
 
-The rule:
+> **The rule: claim what you lint, or realistically will. Nothing else.**
 
-> **Claim what you actually lint. Nothing else.**
+| Tier | Extensions | Why |
+|---|---|---|
+| **In use** | `.js .mjs .cjs .jsx` · `.sh .bash .zsh` | The `language:` values the served projects' rules actually declare today |
+| **Dogfood** | `.json .yaml .yml .md` · `.css .scss .html .htm` | Web + config formats rules get written for next. An eyes-open bet, not a free lunch — see below |
+| **Never** | `.ts .tsx .py .rs .go .java .rb .php .c .cpp .h .cs .lua .kt .swift` | All owned by official language servers |
 
-**Claimed:** `.js .mjs .cjs .jsx` (javascript) · `.sh .bash .zsh` (bash) — the exact set of `language:`
-values declared by the rules this plugin serves.
+Extensions that ast-grep maps to the **same** language come as a set — `.yml` with `.yaml`, `.scss`
+with `.css`, `.htm` with `.html`. A partial claim would just be a confusing one.
 
-The tempting weaker rule is "claim anything no official Claude Code server has claimed yet". That is a
-worse rule, and it is worth saying why: popular language servers exist for `.tf`, `.nix`, `.json`,
-`.yaml`, `.md`, `.css` and `.html` too — any of them could ship as a third-party plugin tomorrow, and a
-greedy map here would silently kill it. **The official list tells you what is contested today; it
-cannot tell you what is contested tomorrow.** An extension you have no rules for buys you nothing and
-costs a language server someone may want. Coverage is not the thing to maximise; **blast radius is the
-thing to minimise.**
+**The dogfood tier is a real trade, so here it is plainly.** No *official* Claude Code server claims
+those eight. But popular third-party servers exist for all of them — `yaml-language-server`, `marksman`,
+`vscode-json` / `css` / `html`. If one ever ships as a Claude Code plugin and you install it, one of the
+two will lose the extension. **The official list tells you what is contested today; it cannot tell you
+what is contested tomorrow.** This plugin accepts that risk for its own dogfooding; if you would rather
+not, delete those entries from `plugin.json` and `ALLOWED` — it is a two-line change.
 
 **Deliberately contested:** `.js .mjs .cjs .jsx` — `typescript-lsp` claims these too. We claim them
 anyway, because JavaScript structural rules are this plugin's reason to exist. **If you run
 `typescript-lsp` as well, the two may be mutually exclusive on `.js`.** `/plugin` names the winner.
-That trade is stated here rather than hidden.
 
-**Never claimed:** `.ts .tsx .py .rs .go .java .rb .php .c .cpp .h .cs .lua .kt .swift` — all owned by
-official language servers. Claiming them would silently disable `pyright-lsp` / `rust-analyzer-lsp` /
-`gopls-lsp` / `jdtls-lsp`. **A plugin that quietly breaks another plugin is the worst kind of plugin.**
+**Never claimed** is the hard rule, not a preference: claiming those would silently disable
+`pyright-lsp` / `rust-analyzer-lsp` / `gopls-lsp` / `jdtls-lsp`. **A plugin that quietly breaks another
+plugin is the worst kind of plugin.**
 
 `check-extensions.mjs` enforces both rules on every `npm run check` and fails the build on a violation.
-Its `--refresh` flag re-derives the official claim list from the marketplace on your machine, so it
-cannot quietly rot as Anthropic ships new language servers.
+Its `--refresh` flag re-derives the official claim list from the marketplace on your machine, so the
+hard rule cannot quietly rot as Anthropic ships new language servers.
 
 ### Adding a language
 

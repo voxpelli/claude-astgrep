@@ -23,6 +23,30 @@ Initial release.
   it**. The second half is what makes it an oracle rather than a smoke test: a check that only asserts
   the error case cannot distinguish a working linter from one that fires on everything.
 
+## 0.3.0 — 2026-07-11
+
+### Added
+
+- **Claims the web + config formats too — 15 extensions, up from 7.** Adds `.json` `.yaml` `.yml` `.md`
+  and `.css` `.scss` `.html` `.htm`. These are the formats rules get written for next, and this is a
+  plugin its author dogfoods; claiming them now means a new rule works the day it is written.
+
+  Stated plainly, because it is a real trade and not a free lunch: **no *official* Claude Code language
+  server claims those eight — but popular third-party ones exist for every one of them**
+  (`yaml-language-server`, `marksman`, `vscode-json`/`css`/`html`). If one ever ships as a Claude Code
+  plugin and you install it, one of the two will lose the extension, because the first server registered
+  for an extension wins and the others never start. The official list tells you what is contested
+  *today*; it cannot tell you what is contested *tomorrow*. The allowlist in `check-extensions.mjs` now
+  carries the two tiers explicitly — **in use** vs **dogfood** — so the bet is legible rather than
+  buried.
+
+  Extensions ast-grep maps to the same language come as a set (`.yml` with `.yaml`, `.scss` with
+  `.css`, `.htm` with `.html`); a partial claim would only be confusing.
+
+The **hard** rule is unchanged and still enforced: never claim an extension owned by an official
+language server (`.ts .tsx .py .rs .go .java .rb .php .c .cpp .h .cs .lua .kt .swift`). Verified the
+guard still fires on a planted `.py` and on a planted `.tf`.
+
 ## 0.2.0 — 2026-07-11
 
 ### Added

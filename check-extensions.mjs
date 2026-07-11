@@ -51,20 +51,35 @@ const DELIBERATE_CONTEST = new Set(['.js', '.mjs', '.cjs', '.jsx']);
 // THE ALLOWLIST IS THE REAL RULE, and it is stricter than "not claimed by an official server".
 //
 // "Uncontested by Claude Code's official marketplace" is a weaker guarantee than it sounds: popular
-// language servers exist for .tf, .nix, .json, .yaml, .md, .css and .html, and any of them could ship
-// as a third-party plugin tomorrow — at which point a greedy map here would silently kill it. The
-// official list tells you what is contested TODAY; it cannot tell you what is contested tomorrow.
+// language servers exist for .tf, .nix, .json, .yaml, .md, .css and .html, and any could ship as a
+// third-party Claude Code plugin tomorrow — at which point a greedy map here would silently kill it.
+// The official list tells you what is contested TODAY; it cannot tell you what is contested tomorrow.
 //
-// So the rule is not "claim everything nobody has claimed yet". It is: CLAIM WHAT YOU ACTUALLY LINT.
-// An extension you have no rules for buys you exactly nothing, and costs a language server you or
-// someone else may want later. Blast radius is the thing to minimise, not coverage.
+// So the rule is not "claim everything nobody has claimed yet". It is: CLAIM WHAT YOU LINT, OR
+// REALISTICALLY WILL. An extension you will never write a rule for buys nothing and costs a language
+// server someone may want. Blast radius is the thing to minimise, not coverage.
 //
-// This set is the union of the `language:` values actually declared by the rules in the projects this
-// plugin serves (javascript, bash). To add a language: add a rule for it FIRST, then widen this list.
-// Never the other way round.
+// The two tiers below are a deliberate, eyes-open split:
+//
+//   IN USE      — languages the served projects' rules actually declare today (javascript, bash).
+//   DOGFOOD     — languages the owner realistically writes rules for next (web + config formats).
+//                 These are NOT claimed by any official Claude Code server, but they DO have popular
+//                 third-party servers (yaml-language-server, marksman, vscode-json/css/html). If one
+//                 of those ever ships as a Claude Code plugin and you install it, one of the two will
+//                 lose the extension. This is an accepted, documented trade for a personal plugin —
+//                 not a claim that it is risk-free.
+//
+// Everything ast-grep maps to the SAME language comes along together (.yml with .yaml, .scss with
+// .css, .htm with .html) — a partial claim would just be a confusing one.
+//
+// To add a language: add a rule for it FIRST, then widen this list. Never the other way round.
 const ALLOWED = new Set([
-  '.js', '.mjs', '.cjs', '.jsx',     // javascript
-  '.sh', '.bash', '.zsh',            // bash
+  // IN USE
+  '.js', '.mjs', '.cjs', '.jsx',                 // javascript
+  '.sh', '.bash', '.zsh',                        // bash
+  // DOGFOOD
+  '.json', '.yaml', '.yml', '.md',               // config + docs
+  '.css', '.scss', '.html', '.htm',              // web
 ]);
 
 if (process.argv.includes('--refresh')) {
