@@ -119,13 +119,13 @@ That message never surfaces. Claude Code shows a server's *stderr* under `--debu
 handshake, and the better part of a day still went into rediscovering it by hand. Filed, gently, as the
 most useful thing to fix.
 
-**Nobody is really the villain here, which took a while to accept.** LSP makes dynamic registration
-opt-in — *"Not all clients need to support dynamic capability registration. A client opts in via the
-`dynamicRegistration` property"* — and Claude Code advertises that property as `undefined`. It never
-claimed to watch files, and it isn't obliged to. ast-grep asks anyway without checking, which is *also*
-fine: `didChangeWatchedFiles` has **no static path at all**, so asking and being turned down is a
-legitimate outcome, and ast-grep handles the refusal correctly. Two reasonable designs; the gap is just
-between them.
+**Both sides are behaving correctly, which is the awkward part.** LSP makes dynamic registration opt-in —
+*"Not all clients need to support dynamic capability registration. A client opts in via the
+`dynamicRegistration` property"* — and Claude Code advertises that property as `undefined`. It doesn't
+claim the capability, so it isn't obliged to provide it. ast-grep asks anyway without checking, which is
+also permitted: `didChangeWatchedFiles` has **no static path at all**, so asking and being turned down is
+a legitimate outcome, and ast-grep handles the refusal correctly. The gap is between the two designs, not
+inside either one.
 
 What ast-grep lacks is a **fallback**. `rust-analyzer` and `pyright` check the capability, see it absent,
 and watch the files themselves — which is exactly why they work here and ast-grep doesn't. That's the

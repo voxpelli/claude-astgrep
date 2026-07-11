@@ -11,12 +11,12 @@
 // `-32601 "Unhandled method"` and watches nothing, so ast-grep never learns its rules changed and
 // serves its STARTUP RULE SET FOREVER, while document sync keeps working perfectly.
 //
-// Nobody is really at fault here, and it is worth saying so, because the temptation is to look for a
-// villain and there isn't one. LSP makes dynamic registration opt-in — "a client opts in via the
-// `dynamicRegistration` property" — and Claude Code advertises that property as `undefined` (measured).
-// It never claimed to watch files, and it is not obliged to. ast-grep asks anyway without checking,
-// which is *also* fine: `didChangeWatchedFiles` has no static path at all, so asking and being turned
-// down is a legitimate outcome. Both sides are behaving reasonably; the gap is simply between them.
+// Both sides are behaving correctly, which is what makes this awkward to fix in one place. LSP makes
+// dynamic registration opt-in — "a client opts in via the `dynamicRegistration` property" — and Claude
+// Code advertises that property as `undefined` (measured). It does not claim the capability, so it is
+// not obliged to provide it. ast-grep asks anyway without checking, which is also permitted:
+// `didChangeWatchedFiles` has no static path at all, so asking and being turned down is a legitimate
+// outcome. The gap is between the two designs, not inside either one.
 //
 // What ast-grep lacks is a FALLBACK. rust-analyzer and pyright check the capability, see it absent, and
 // watch the files themselves — which is why they work here and ast-grep doesn't. That fallback is the
