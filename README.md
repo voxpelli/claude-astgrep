@@ -174,11 +174,27 @@ appear on their own.*
 diagnostics quietly *vanish* rather than error. If a rule stops firing for no reason, run `ast-grep scan`
 on the CLI: a fresh process reads current rules and will actually tell you the rule is broken.
 
-### Turning it off
+### Turning it off, and turning it up
 
-`LSP_SHIM_DISABLE=1` bypasses the shim entirely and runs `ast-grep lsp` unproxied — 0.3.1's behaviour,
-without downgrading. It exists because a shim in the hot path of every LSP message should always have
-an off switch that does not require shipping a fix.
+| Env var | Effect |
+|---|---|
+| `LSP_SHIM_DISABLE=1` | Bypass the shim entirely; run `ast-grep lsp` unproxied. 0.3.1's behaviour, without downgrading. A shim in the hot path of every LSP message should always have an off switch that does not require shipping a fix. |
+| `LSP_SHIM_DEBUG=1` | Trace what the shim is doing: the client's advertised capabilities, the globs it is watching, and a line per reload. |
+
+**By default the shim is silent — but only about the things that are working.** Anything meaning it is
+degraded or dead is *always* printed to stderr: the server binary missing from `PATH`, framing
+collapsing to a raw pipe, and above all **a watcher that fails to attach** —
+
+```
+[lsp-shim] FAILED to watch /path/to/project: <reason>
+[lsp-shim] rules will NOT hot-reload — restart to pick up rule changes. Diagnostics are unaffected.
+```
+
+That asymmetry is not fussiness. This entire plugin exists because a failure was invisible: ast-grep
+reported its refused registration accurately, over `window/logMessage`, and **Claude Code discarded the
+message** — turning a precise, immediate error into "the rules just don't reload" and costing a day to
+rediagnose. Building a tool that fails quietly, right after that, would be a poor joke. A half-deaf tool
+that *says* it is half deaf is a different thing from one that pretends.
 
 ### It is a stopgap, and it is meant to die
 

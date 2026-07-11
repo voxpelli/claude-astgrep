@@ -7,18 +7,31 @@
 // WHY THIS EXISTS
 //
 // The LSP spec lets a server ask the *client* to watch files on its behalf, via a
-// `client/registerCapability` request for `workspace/didChangeWatchedFiles`. The client is required
-// to reply. Claude Code replies `-32601 "Unhandled method"` and watches nothing.
+// `client/registerCapability` request for `workspace/didChangeWatchedFiles`. Claude Code replies
+// `-32601 "Unhandled method"` and watches nothing, so ast-grep never learns its rules changed and
+// serves its STARTUP RULE SET FOREVER, while document sync keeps working perfectly.
 //
-// Consequences, ascending:
-//   * ast-grep registers `**/*.{yml,yaml}` to hot-reload its rules. It uses tower-lsp, which fires
-//     the request without blocking — so it does not hang, it just never learns the rules changed and
-//     serves its STARTUP RULE SET FOREVER. Document sync keeps working perfectly, which is what makes
-//     the bug so deceptive: the server looks healthy while being half deaf.
-//   * `csharp-lsp` and `elixir-lsp` — in Anthropic's own marketplace — BLOCK on the reply and hang.
+// Claude Code is within its rights here, which is worth stating plainly. LSP makes dynamic
+// registration opt-in — "a client opts in via the `dynamicRegistration` property" — and Claude Code
+// advertises that property as `undefined` (measured). It never promised to watch files. ast-grep asks
+// anyway without checking, which is impolite but not a clear spec violation: `didChangeWatchedFiles`
+// has no static path at all, so asking and being refused is a legitimate outcome. `rust-analyzer` and
+// `pyright` DO check, see the refusal coming, and self-watch instead — which is why they work here and
+// ast-grep does not. That fallback is the real fix; this shim is the bridge to it.
+//
+// AND THE FAILURE WAS NEVER SILENT — that part cost a day to learn. ast-grep detects the refusal and
+// reports it accurately, over `window/logMessage`:
+//
+//     [ERROR] Failed to register file watchers: Error { code: MethodNotFound, ... }
+//
+// CLAUDE CODE DISCARDS THAT MESSAGE. It surfaces a server's stderr under --debug but drops
+// window/logMessage entirely, so a precise, immediate error report became "the rules just don't
+// reload". That is the reason this file's own logging is loud about faults and quiet about success:
+// building a tool that fails silently, right after that, would be a poor joke.
 //
 // anthropics/claude-code#32595 and its re-file #52693 are both CLOSED / NOT_PLANNED. A client-side
-// fix is not coming, which is what promotes this from a workaround to the only path.
+// fix is not coming, which is what promotes this from a workaround to the only path — until ast-grep
+// self-watches, at which point this file should be deleted.
 //
 // WHAT IT DOES, AND WHICH HALF MATTERS
 //
@@ -52,8 +65,23 @@ if (!command) {
   process.exit(64); // EX_USAGE
 }
 
-/** Everything we say goes to stderr — stdout is the LSP channel and must carry nothing else. */
+// Everything we say goes to stderr — stdout is the LSP channel and must carry nothing else.
+//
+// Two levels, and the split is deliberate. This whole shim exists because a failure was invisible:
+// ast-grep reported its failed registration accurately, over `window/logMessage`, and Claude Code
+// discarded the message — so a precise, immediate error report became "the rules just don't reload"
+// and cost a day to rediagnose. Reproducing that in our own code would be a poor joke.
+//
+//   log()   — the shim is degraded or dead. ALWAYS printed. No server, no `node`, watcher failed to
+//             attach, framing collapsed to a raw pipe. Every one of these means the user is about to
+//             get stale rules or none, and must never have to guess why.
+//   debug() — steady-state chatter. Off unless LSP_SHIM_DEBUG=1. The capability probe, the startup
+//             confirmation, and a line per reload — useful once, noise forever.
+//
+// Note that stderr is the ONLY channel that reaches anyone here: Claude Code surfaces a server's
+// stderr under `--debug`, but drops `window/logMessage` entirely. So this is not a nice-to-have.
 const log = (msg) => process.stderr.write(`[lsp-shim] ${msg}\n`);
+const debug = (msg) => { if (DEBUG) log(msg); };
 
 // --- Kill switch. Not a debug flag: if this shim ever breaks a server, the user needs a way to get
 // their diagnostics back that does not involve waiting for us to ship a fix.
@@ -90,7 +118,7 @@ function main () {
   // A watcher event can land in the window between the server dying and our cleanup running, and
   // writing to a dead pipe throws EPIPE. Nothing useful can come of that: if the server is gone there
   // is nobody to tell about a rule change.
-  child.stdin.on('error', (err) => log(`server stdin: ${err.message}`));
+  child.stdin.on('error', (err) => debug(`server stdin: ${err.message}`));
   const toChild = (message) => {
     if (child.exitCode !== null || child.signalCode !== null || child.stdin.destroyed) return;
     child.stdin.write(encodeFrame(message));
@@ -109,7 +137,7 @@ function main () {
       type: existsSync(p) ? 2 : 3,
     }));
     toChild({ jsonrpc: '2.0', method: 'workspace/didChangeWatchedFiles', params: { changes } });
-    log(`reload: ${changes.length} watched file(s) changed${DEBUG ? ` — ${paths.join(', ')}` : ''}`);
+    debug(`reload: ${changes.length} watched file(s) changed — ${paths.join(', ')}`);
   };
 
   const restartWatcher = () => {
@@ -125,7 +153,7 @@ function main () {
       log,
       onChange: injectDidChangeWatchedFiles,
     });
-    log(`watching ${root} for ${globs.map((g) => JSON.stringify(g)).join(', ')}`);
+    debug(`watching ${root} for ${globs.map((g) => JSON.stringify(g)).join(', ')}`);
   };
 
   // --- client -> server. Forwarded verbatim, with EXACTLY ONE exception: `initialize`.
@@ -145,8 +173,8 @@ function main () {
     // decline to register and fall back to self-watching. If it ADVERTISES it and then answers -32601
     // to the registration, that is a plain broken promise.
     const advertised = params.capabilities?.workspace?.didChangeWatchedFiles?.dynamicRegistration;
-    log(`client advertises workspace.didChangeWatchedFiles.dynamicRegistration = ${advertised}`);
-    if (DEBUG) log(`client capabilities: ${JSON.stringify(params.capabilities)}`);
+    debug(`client advertises workspace.didChangeWatchedFiles.dynamicRegistration = ${advertised}`);
+    debug(`client capabilities: ${JSON.stringify(params.capabilities)}`);
 
     // THE ONE REWRITE. Everything else on this stream is passed through byte-for-byte; here we amend
     // the client's advertised capabilities before the server sees them.
@@ -171,7 +199,7 @@ function main () {
         // NOT relativePatternSupport: we resolve globs against the workspace root, not against an
         // arbitrary RelativePattern baseUri. Advertising it would be a claim we cannot honour.
       };
-      log('injected workspace.didChangeWatchedFiles.dynamicRegistration=true — the shim implements it, so the server should be told');
+      debug('injected workspace.didChangeWatchedFiles.dynamicRegistration=true — the shim implements it, so the server should be told');
       return { ...message, params: { ...params, capabilities } };
     }
   });
@@ -217,7 +245,7 @@ function main () {
     // Stop holding the loop open, but do NOT process.exit(): that would truncate anything still
     // buffered in our stdout. Setting exitCode and letting the loop drain flushes it first.
     process.stdin.pause();
-    if (signal) log(`server terminated by ${signal}`);
+    if (signal) debug(`server terminated by ${signal}`);
     process.exitCode = signal ? 1 : (code ?? 0);
   });
 

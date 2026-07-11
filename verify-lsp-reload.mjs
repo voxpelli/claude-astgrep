@@ -53,8 +53,8 @@ const DOC_URI = pathToFileURL(DOC).href;
  * Drive a language server over stdio. Uses the shim's OWN framing module, so the verifier dogfoods
  * the code it is verifying rather than re-rolling a second, subtly different reader.
  */
-function driver (cmd, argv) {
-  const proc = spawn(cmd, argv, { cwd: ROOT, stdio: ['pipe', 'pipe', 'pipe'] });
+function driver (cmd, argv, env = {}) {
+  const proc = spawn(cmd, argv, { cwd: ROOT, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, ...env } });
   let stderr = '';
   proc.stderr.on('data', (d) => { stderr += d; });
 
@@ -153,7 +153,9 @@ try {
   console.log('\nGREEN — the same server, behind the shim:\n');
   writeRule(MSG_ONE); // reset
 
-  const shim = driver(process.execPath, [SHIM, 'ast-grep', 'lsp', '-c', path.join(ROOT, 'sgconfig.yml')]);
+  // LSP_SHIM_DEBUG=1 so the assertions below can read what the shim decided. It is silent by default —
+  // the "quiet by default" half of that contract is asserted separately, at the end.
+  const shim = driver(process.execPath, [SHIM, 'ast-grep', 'lsp', '-c', path.join(ROOT, 'sgconfig.yml')], { LSP_SHIM_DEBUG: '1' });
   const first = await shim.open();
   check(messagesOf(first).includes(MSG_ONE), `shim is transparent: the violation still diagnoses ("${MSG_ONE}")`);
 
@@ -194,14 +196,28 @@ try {
   check(!alive, 'killing the shim does not leave an orphaned language server behind');
 
   // ------------------------------------------------------------------ failure modes.
-  console.log('\nFailure modes:\n');
+  console.log('\nFailure modes — the shim is quiet about success, never about failure:\n');
   {
+    // Quiet by DEFAULT: a whole healthy session — startup, watch, AND a reload — with no env set at all.
+    // A proxy in the hot path of every message should not narrate itself to a user who did not ask.
+    writeRule(MSG_ONE);
+    const quiet = driver(process.execPath, [SHIM, 'ast-grep', 'lsp', '-c', path.join(ROOT, 'sgconfig.yml')]);
+    await quiet.open();
+    writeRule(MSG_TWO);                       // trigger a real reload...
+    await quiet.nextDiagnostics(8000);        // ...and confirm it actually happened
+    quiet.proc.kill();
+    check(!/\[lsp-shim\]/.test(quiet.stderr()), 'a healthy session — including a reload — prints NOTHING by default');
+
+    // ...but a BROKEN shim must still shout. This is the guard that stops someone — most likely me —
+    // quietly demoting a fault to debug() later. The whole reason this plugin exists is that ast-grep
+    // reported its failure correctly and the CLIENT threw the message away; shipping a tool that fails
+    // silently, right after discovering that, would be indefensible.
     const missing = spawn(process.execPath, [SHIM, 'definitely-not-a-real-binary', 'lsp'], { stdio: ['pipe', 'pipe', 'pipe'] });
     let err = '';
     missing.stderr.on('data', (d) => { err += d; });
     const code = await new Promise((r) => missing.on('exit', r));
     check(code !== 0, `a missing server binary exits non-zero (got ${code})`);
-    check(/not on PATH|ENOENT/.test(err), 'and says so in words, rather than dying mute');
+    check(/not on PATH|ENOENT/.test(err), 'and says so in words WITHOUT LSP_SHIM_DEBUG — a fault is never quiet');
   }
 } catch (err) {
   check(false, err.message);

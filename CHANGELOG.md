@@ -4,6 +4,36 @@ All notable changes to `vp-astgrep` are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.4.1 — 2026-07-11
+
+### Changed
+
+- **The shim is silent by default — but only about the things that are working.** 0.4.0 narrated every
+  session to stderr (the capability probe, the watched globs, a line per reload). A proxy in the hot path
+  of every LSP message should not narrate itself to a user who did not ask. Those lines now require
+  **`LSP_SHIM_DEBUG=1`**.
+
+  **Faults are exempt, deliberately.** The server binary missing from `PATH`, framing collapsing to a raw
+  pipe, and above all **a watcher that fails to attach** are printed *always*, with no flag:
+
+  ```
+  [lsp-shim] FAILED to watch /path/to/project: <reason>
+  [lsp-shim] rules will NOT hot-reload — restart to pick up rule changes. Diagnostics are unaffected.
+  ```
+
+  That asymmetry is the whole point. This plugin exists because a failure was invisible: ast-grep
+  reported its refused registration accurately over `window/logMessage`, **Claude Code discarded the
+  message**, and a precise error became "the rules just don't reload" — costing a day to rediagnose.
+  Shipping a tool that fails quietly, immediately after finding that, would be indefensible. Both halves
+  are now asserted in `check:reload`: a healthy session (*including a reload*) prints **nothing**, and a
+  broken one still speaks **without** `LSP_SHIM_DEBUG`. The second guard exists to stop a future
+  maintainer — most likely me — quietly demoting a fault to `debug()`.
+
+### Fixed
+
+- A watch failure previously logged one bland line and did not say what the user had lost. It now states
+  plainly that rules will not hot-reload, and that diagnostics themselves still work.
+
 ## 0.4.0 — 2026-07-11
 
 **Rule hot-reload works.** 0.3.1 documented that it could not — this release retracts that limitation

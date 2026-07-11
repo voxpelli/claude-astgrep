@@ -141,11 +141,16 @@ export function createGlobWatcher ({ root, globs, onChange, log = () => {}, debo
     // `recursive` is supported on macOS and Windows natively, and on Linux since Node 20.
     watcher = watch(root, { recursive: true, persistent: false });
   } catch (err) {
-    log(`watch failed on ${root}: ${err.message} — hot reload disabled, diagnostics unaffected`);
+    // NEVER quiet this. A watcher that fails to attach produces exactly the failure this whole shim
+    // exists to fix: rules silently stop reloading, everything else keeps working, and the user is
+    // left to guess. Say it plainly, and say what still works — a half-deaf tool that admits it is
+    // half deaf is a different thing from one that pretends.
+    log(`FAILED to watch ${root}: ${err.message}`);
+    log('rules will NOT hot-reload — restart to pick up rule changes. Diagnostics themselves are unaffected.');
     return () => {};
   }
 
-  watcher.on('error', (err) => log(`watch error: ${err.message}`));
+  watcher.on('error', (err) => log(`watch error on ${root}: ${err.message} — rule hot-reload may have stopped`));
   watcher.on('change', (_event, filename) => {
     if (!filename) return; // Some platforms omit it; nothing actionable without a name.
     const rel = filename.toString().split(path.sep).join('/');
